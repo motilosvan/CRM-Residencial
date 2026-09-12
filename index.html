@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema Organizador de Correos y CRM Residencial">
+  <title>CRM Residencial | Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">CR</div>
+        <div>
+          <strong>CRM Residencial</strong>
+          <span>Gestión administrativa</span>
+        </div>
+      </div>
+
+      <div class="sidebar-label">MENÚ PRINCIPAL</div>
+      <nav class="main-nav" aria-label="Navegación principal">
+        <button class="nav-link active" data-view="dashboard"><span>▦</span> Dashboard</button>
+        <button class="nav-link" data-view="emails"><span>✉</span> Correos <b class="nav-count">24</b></button>
+        <button class="nav-link" data-view="residents"><span>♙</span> Residentes</button>
+        <button class="nav-link" data-view="requests"><span>▤</span> Solicitudes <b class="nav-count orange">12</b></button>
+        <button class="nav-link" data-view="reports"><span>◫</span> Reportes</button>
+      </nav>
+
+      <div class="sidebar-label settings-label">CONFIGURACIÓN</div>
+      <nav class="main-nav">
+        <button class="nav-link" data-view="settings"><span>⚙</span> Configuración</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="mini-profile">
+          <div class="avatar">AD</div>
+          <div><strong>Administrador</strong><span>Conjunto Residencial</span></div>
+        </div>
+        <div class="status"><i></i> Sistema en modo demostración</div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="mobile-brand">
+          <button class="icon-button" id="menuBtn" aria-label="Abrir menú">☰</button>
+          <strong>CRM Residencial</strong>
+        </div>
+        <div class="topbar-title">
+          <span class="breadcrumb">Sistema / <b id="breadcrumbCurrent">Dashboard</b></span>
+          <h1 id="pageTitle">Panel principal</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="search-box">
+            <span>⌕</span>
+            <input id="globalSearch" type="search" placeholder="Buscar en el sistema...">
+          </div>
+          <button class="icon-button notification" title="Notificaciones">♢<i>3</i></button>
+          <button class="profile-button"><span class="avatar small">AD</span><span class="profile-text">Administrador</span>⌄</button>
+        </div>
+      </header>
+
+      <div id="appContent"></div>
+
+      <footer class="footer">
+        <span>© 2026 CRM Residencial · Proyecto académico</span>
+        <span>Versión inicial 1.0.0</span>
+      </footer>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <button class="modal-close" id="modalClose">×</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
