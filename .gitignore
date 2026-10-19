@@ -10,3 +10,12 @@ Thumbs.db
 node_modules/
 .env
 .env.*
+!.env.example
+
+# Flujo de agentes (opencode / Claude): configuración local, no se versiona
+AGENTS.md
+CLAUDE.md
+opencode.json
+opencode.jsonc
+.opencode/
+.claude/
