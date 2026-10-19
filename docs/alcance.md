@@ -2,30 +2,29 @@
 
 ## 1. Propósito
 
-El sistema pretende convertirse en una plataforma centralizada para organizar la información administrativa y las comunicaciones de un conjunto residencial.
+Plataforma centralizada que convierte los correos de los residentes de un conjunto en solicitudes clasificadas, priorizadas, asignadas y trazables, con indicadores de gestión para la administración.
 
-## 2. Usuarios previstos
+## 2. Usuarios del MVP
 
-### Administrador
-Podrá consultar comunicaciones, gestionar residentes, atender solicitudes y consultar reportes.
+| Rol (`USUARIOS.rol`) | Qué hace |
+|---|---|
+| `ADMIN` — Administrador | Asigna y reasigna responsables, cambia estados, reclasifica, consulta reportes, gestiona usuarios |
+| `SOPORTE` — Personal de soporte | Atiende y avanza las solicitudes que tiene asignadas |
 
-### Personal administrativo
-Podrá gestionar correos, solicitudes y comunicaciones según sus permisos.
-
-### Residente
-En una etapa posterior podrá consultar o generar solicitudes y comunicarse con la administración.
+El **residente no usa el sistema**: solo escribe a la cuenta de Gmail del conjunto (así lo define el informe). Un portal para residentes queda fuera del MVP.
 
 ## 3. Módulos
 
-| Módulo | Propósito |
-|---|---|
-| Dashboard | Resumen de indicadores |
-| Correos | Centralizar y categorizar comunicaciones |
-| Residentes | Administrar perfiles y contactos |
-| Solicitudes | Registrar y dar seguimiento a tickets |
-| Reportes | Analizar la operación |
-| Configuración | Gestionar preferencias y posteriormente permisos |
+| Módulo | Propósito | En el MVP |
+|---|---|---|
+| Ingesta de correos | Recibir cada correo una sola vez y convertirlo en solicitud | Sí (T1; el gateway de Gmail es S3) |
+| Solicitudes | Clasificar, priorizar, asignar, cambiar estado, reclasificar, con historial | Sí (T2–T4) |
+| Dashboard y reportes | Carga por responsable, tiempos de respuesta, % dentro del SLA | Sí (indicadores básicos; T5 formal en S5) |
+| Usuarios | Alta y baja lógica del personal | S4 |
+| Residentes | Directorio para vincular remitentes | Solo lectura / carga inicial; la gestión completa queda fuera del MVP |
+| Configuración | Preferencias | Fuera del MVP |
 
-## 4. Alcance de la primera entrega
+## 4. Entregas
 
-La primera entrega se limita a una propuesta visual navegable. No se requiere persistencia de información ni integración con servicios externos.
+1. **Primera entrega:** propuesta visual navegable (`index.html`), sin persistencia.
+2. **MVP (en curso):** núcleo transaccional terminado (semanas 1–2); gateway, API, panel conectado y endurecimiento en las semanas 3–6. Detalle en [`plan-desarrollo.md`](plan-desarrollo.md).
