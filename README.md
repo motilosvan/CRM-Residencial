@@ -1,143 +1,100 @@
-# Sistema Organizador de Correos & CRM Residencial
+# Sistema Organizador de Correos & CRM Residencial (SOC-CRM)
 
-![Estado](https://img.shields.io/badge/estado-propuesta%20inicial-4e9292)
-![Versión](https://img.shields.io/badge/versión-1.0.0-123e46)
-![Tecnologías](https://img.shields.io/badge/tecnologías-HTML%20%7C%20CSS%20%7C%20JavaScript-orange)
+![Estado](https://img.shields.io/badge/estado-MVP%20en%20desarrollo%20(S1%E2%80%93S2)-4e9292)
+![Versión](https://img.shields.io/badge/versión-0.2.0-123e46)
+![Tecnologías](https://img.shields.io/badge/tecnologías-SQL%20Server%20%7C%20Node.js%20%7C%20TypeScript-orange)
 
 ## 📌 Descripción
 
-**Sistema Organizador de Correos & CRM Residencial** es una propuesta de sistema transaccional orientada a la administración de un conjunto residencial.
+**SOC-CRM** es un sistema transaccional para la administración de un conjunto residencial: convierte cada correo de un residente en una **solicitud** con categoría, prioridad, responsable, estado e historial, de forma que nada se pierda, nada se duplique y todo cambio quede registrado.
 
-El proyecto busca centralizar las comunicaciones de los residentes, organizar los correos electrónicos, gestionar solicitudes y facilitar el seguimiento de la atención administrativa.
-
-Esta versión corresponde al **primer acercamiento práctico al proyecto**. Se presenta una interfaz funcional de demostración, sin conexión a base de datos ni servicios externos.
+El foco del proyecto es la **base de datos transaccional** (SQL Server): las reglas de integridad viven en la base de datos y se demuestran con pruebas automáticas contra un servidor real.
 
 ## 🎯 Problemática
 
-Actualmente, la gestión de un alto volumen de correos puede generar:
+- Falta de organización de la información y de trazabilidad de las comunicaciones.
+- Mensajes urgentes mezclados con la correspondencia rutinaria.
+- Demoras en la atención y ningún indicador de gestión.
 
-- Falta de organización de la información.
-- Dificultad para hacer seguimiento a las respuestas.
-- Demoras en la atención de solicitudes.
-- Información de residentes dispersa.
-- Poca trazabilidad de las comunicaciones.
+## ✅ Estado actual (semanas 1 y 2 del plan)
 
-## 🎯 Objetivo general
+| Funcionalidad | Estado |
+|---|---|
+| Base de datos transaccional (migraciones 0002–0005, triggers, rol de mínimo privilegio) | Hecho |
+| Ingesta idempotente de correos (T1) + checkpoint IMAP (T6) | Hecho |
+| Clasificación y priorización automáticas | Hecho (reglas por palabras clave) |
+| Asignar / reasignar (T2), cambiar estado (T3), reclasificar (T4) | Hecho |
+| Consultas de bandeja, detalle e indicadores (lectura consistente SNAPSHOT) | Hecho |
+| 180 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
+| Visor local de demostración | Provisional |
+| Email Gateway con Gmail (S3), API REST con login (S4), panel real (S5) | Pendiente |
 
-Implementar progresivamente un sistema estructurado para gestionar correos, facilitar respuestas rápidas y mantener registros claros de las comunicaciones y solicitudes de un conjunto residencial.
-
-## 💡 Alcance del proyecto
-
-El sistema está planteado para incorporar:
-
-1. **Bandeja de correos:** recepción centralizada y categorización.
-2. **CRM de residentes:** perfiles, unidades y datos de contacto.
-3. **Solicitudes:** tickets de mantenimiento, reservas y requerimientos.
-4. **Reportes:** indicadores de atención y eficiencia administrativa.
-5. **Control de usuarios:** permisos y trazabilidad en etapas posteriores.
-
-## 🖥️ Primera interfaz
-
-La versión actual incluye:
-
-- Dashboard administrativo.
-- Menú lateral y navegación entre módulos.
-- Resumen de indicadores.
-- Bandeja de correos.
-- Filtros y búsqueda.
-- Gestión visual de residentes.
-- Gestión visual de solicitudes.
-- Dashboard de reportes.
-- Configuración.
-- Ventanas modales para acciones principales.
-- Diseño responsive para computador y dispositivos pequeños.
+Detalle y justificación: [`docs/estudio-funcionalidad-y-bd-transaccional.md`](docs/estudio-funcionalidad-y-bd-transaccional.md) · Plan: [`docs/plan-desarrollo.md`](docs/plan-desarrollo.md) · Arquitectura: [`docs/arquitectura.md`](docs/arquitectura.md).
 
 ## 🛠️ Tecnologías
 
-Para esta primera etapa se utilizaron:
-
-- **HTML5:** estructura.
-- **CSS3:** diseño visual y responsive.
-- **JavaScript:** navegación, filtros, búsqueda y simulación de interacciones.
-
-No se utilizan frameworks ni dependencias externas.
-
-## 🚫 Elementos que todavía NO se implementan
-
-De acuerdo con el alcance de esta actividad, esta versión no contiene:
-
-- Base de datos.
-- Backend.
-- CRUD real.
-- APIs.
-- Autenticación real.
-- Envío de correos real.
-- Pruebas automatizadas.
-- Integración con servicios externos.
-
-Estos componentes serán incorporados progresivamente en las siguientes actividades.
+- **Microsoft SQL Server 2022** (Docker) — base de datos transaccional.
+- **Node.js 20+ y TypeScript** — lógica de negocio (`mssql`, `zod`).
+- **Vitest** — pruebas de integración contra SQL Server real.
+- **HTML, CSS y JavaScript** — panel (la interfaz original de la primera entrega, que se conectará a la API en S5).
 
 ## ▶️ Ejecución local
 
-No requiere instalación.
+Requisitos: Docker Desktop y Node.js 20 o superior.
 
-1. Descargar o clonar el repositorio.
-2. Abrir la carpeta del proyecto.
-3. Abrir `index.html` en Google Chrome, Microsoft Edge o Firefox.
-4. Navegar por los módulos utilizando el menú lateral.
+```bash
+cp .env.example .env        # y reemplazar cada <cambiar> por una contraseña propia
+npm install
+docker compose up -d db     # SQL Server, solo accesible desde este equipo
+npm run db:migrate          # crea la BD, aplica migraciones y el login de la aplicación
+npm run gate                # migraciones + lint + tipos + 180 pruebas
+npm run demo                # visor en http://127.0.0.1:3100 con datos de ejemplo
+```
 
-También puede utilizarse una extensión como **Live Server** en Visual Studio Code para una experiencia de desarrollo más cómoda.
+La interfaz original (maqueta de la primera entrega, con datos de ejemplo) se sigue pudiendo abrir directamente con `index.html`.
 
 ## 📁 Estructura
 
 ```text
 CRM-Residencial/
-├── index.html
-├── README.md
-├── .gitignore
-├── LICENSE
-├── css/
-│   └── styles.css
-├── js/
-│   └── app.js
-├── docs/
-│   ├── alcance.md
-│   └── arquitectura.md
-└── assets/
-    └── .gitkeep
+├── ScriptBaseDatosCRM.sql          # línea base del modelo relacional (no se edita)
+├── db/migrations/                  # 0002 … 0005: integridad, fechas, invariantes, rol de la app
+├── apps/api/src/
+│   ├── domain/                     # clasificador, priorizador, máquina de estados (puro)
+│   ├── modules/                    # transacciones T1–T4 y consultas
+│   ├── db/                         # withTx, pool, migraciones, login de la app
+│   └── demo/                       # visor provisional
+├── apps/api/test/                  # utilidades y datos solo de pruebas
+├── index.html, css/, js/           # interfaz de la primera entrega
+├── docs/                           # plan, estudio, arquitectura, alcance
+├── AGENTS.md, opencode.jsonc, .opencode/   # flujo de desarrollo con agentes
+└── docker-compose.yml, .env.example
 ```
 
-## 🗺️ Evolución prevista
+## 🗺️ Evolución
 
 ### Etapa 1 — Propuesta visual
-- [x] Crear repositorio.
-- [x] Diseñar dashboard.
-- [x] Crear navegación.
-- [x] Crear módulos visuales.
-- [x] Registrar primer commit.
+- [x] Repositorio, dashboard, navegación y módulos visuales.
 
-### Etapa 2 — Persistencia
-- [ ] Diseñar base de datos.
-- [ ] Crear tablas de residentes, correos y solicitudes.
-- [ ] Implementar backend.
-- [ ] Conectar formularios.
+### Etapa 2 — Persistencia y núcleo transaccional (semanas 1–2)
+- [x] Diseño y script de la base de datos.
+- [x] Migraciones con integridad transaccional, triggers y roles.
+- [x] Transacciones de ingesta, asignación, estados y reclasificación.
+- [x] Pruebas automáticas de concurrencia, atomicidad y permisos.
 
-### Etapa 3 — Sistema transaccional
-- [ ] CRUD de residentes.
-- [ ] CRUD de solicitudes.
-- [ ] Gestión de correos.
-- [ ] Autenticación y permisos.
+### Etapa 3 — Integración (semanas 3–5)
+- [ ] Email Gateway con Gmail.
+- [ ] API REST, autenticación y permisos por rol.
+- [ ] Panel conectado a la API y reportes.
 
-### Etapa 4 — Analítica
-- [ ] Reportes reales.
-- [ ] Indicadores.
-- [ ] Historial y trazabilidad.
-- [ ] Mejoras de seguridad.
+### Etapa 4 — Endurecimiento (semana 6)
+- [ ] Pruebas con correos reales y de carga.
+- [ ] Backup y restauración probados; CI.
 
 ## 👨‍💻 Proyecto académico
 
-**Nombre:** Sistema Organizador de Correos & CRM Residencial  
-**Tipo:** Sistema transaccional  
-**Contexto:** Administración de conjunto residencial  
-**Versión:** 1.0.0  
-**Estado:** Propuesta visual inicial
+**Nombre:** Sistema Organizador de Correos & CRM Residencial
+**Asignatura:** Sistemas Transaccionales / Arquitectura de Software — Universidad Manuela Beltrán
+**Tipo:** Sistema transaccional
+**Versión:** 0.2.0
+**Estado:** MVP en desarrollo (núcleo transaccional terminado)
