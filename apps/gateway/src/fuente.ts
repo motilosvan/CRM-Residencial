@@ -100,6 +100,24 @@ export class FuenteImap implements FuenteCorreo {
   }
 }
 
+const CODIGOS_CERTIFICADO = new Set([
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'CERT_HAS_EXPIRED',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+
+/**
+ * El certificado del servidor no es verificable: típico de un antivirus o proxy que intercepta TLS
+ * (p. ej. "Avast Web/Mail Shield Root"). Reintentar no sirve; se corrige en el equipo, no en el código.
+ */
+export function esErrorDeCertificado(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  return code !== undefined && CODIGOS_CERTIFICADO.has(code);
+}
+
 /** Gmail rechazó usuario o contraseña de aplicación: reintentar no sirve (y puede bloquear la cuenta). */
 export function esErrorDeAutenticacion(err: unknown): boolean {
   return (err as { authenticationFailed?: boolean } | null)?.authenticationFailed === true;

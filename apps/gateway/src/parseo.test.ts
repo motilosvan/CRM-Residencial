@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filtrarMayores } from './fuente.js';
+import { esErrorDeCertificado, filtrarMayores } from './fuente.js';
 import { aCorreoEntrante, correoDeRespaldo, messageIdSintetico } from './parseo.js';
 import { mensajeCrudo } from '../test/mensajes.js';
 
@@ -65,5 +65,13 @@ describe('Gateway · filtrarMayores (IMAP `UID n:*`)', () => {
   it('descarta el último mensaje que IMAP devuelve aunque su UID sea menor, ordena y quita repetidos', () => {
     expect(filtrarMayores([42], 42)).toEqual([]);
     expect(filtrarMayores([45, 43, 44, 43], 42)).toEqual([43, 44, 45]);
+  });
+});
+
+describe('Gateway · esErrorDeCertificado', () => {
+  it('reconoce la intercepción TLS (antivirus/proxy) y no la confunde con otros fallos', () => {
+    expect(esErrorDeCertificado(Object.assign(new Error('x'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }))).toBe(true);
+    expect(esErrorDeCertificado(Object.assign(new Error('x'), { code: 'ECONNRESET' }))).toBe(false);
+    expect(esErrorDeCertificado(null)).toBe(false);
   });
 });
