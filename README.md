@@ -28,7 +28,7 @@ El foco del proyecto es la **base de datos transaccional** (SQL Server): las reg
 | Email Gateway con Gmail por IMAP (S3) | Hecho |
 | API HTTP de solo lectura para el buzón (Fastify, inicio de S4) | Hecho, sin login todavía |
 | Panel React/Vite: buzón unificado con datos reales | Hecho; las demás pantallas siguen con datos simulados |
-| 216 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
+| 229 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
 | Visor local de demostración | Provisional |
 | Login y rutas de escritura en la API (S4), resto del panel conectado (S5) | Pendiente |
 
@@ -52,7 +52,7 @@ npm install
 npm run web:install         # dependencias del panel (apps/web)
 docker compose up -d db     # SQL Server, solo accesible desde este equipo
 npm run db:migrate          # crea la BD, aplica migraciones y el login de la aplicación
-npm run gate                # migraciones + lint + tipos + 216 pruebas
+npm run gate                # migraciones + lint + tipos + 229 pruebas
 ```
 
 ### Ver el buzón unificado de Gmail

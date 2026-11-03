@@ -4,6 +4,7 @@ import { ingestarCorreo, type CorreoEntrante } from '../../api/src/modules/inges
 import { setupTestDb, type TestDb } from '../../api/test/helpers/testDb.js';
 import { BuzonFalso } from '../test/buzonFalso.js';
 import { mensajeCrudo } from '../test/mensajes.js';
+import { correoNoDescargable } from './parseo.js';
 import { ErrorSincronizacion, Intentos, sincronizar, type OpcionesSincronizacion } from './sincronizar.js';
 
 let db: TestDb;
@@ -159,6 +160,79 @@ describe('Gateway · sincronizar', () => {
     caida = false;
     expect(await sincronizar(db.pool, b.fuente(), o, intentos)).toMatchObject({ nuevos: 1, respaldos: 0 });
     expect(await categoriaDe('<t6-a@x>')).toBe('SEGURIDAD');
+  });
+
+  it('un correo que no se deja guardar ni SIN_CLASIFICAR se registra en versión mínima y el buzón sigue', async () => {
+    const b = new BuzonFalso();
+    b.agregar(mensajeCrudo({ id: '<t8-a@x>' }), haceDias(1));
+    const veneno = b.agregar(mensajeCrudo({ id: '<t8-veneno@x>', de: 'Ana <ana@mail.com>', asunto: 'Fuga en el baño' }), haceDias(1));
+    b.agregar(mensajeCrudo({ id: '<t8-c@x>' }), haceDias(1));
+    // Un dato que la BD rechaza siempre (p. ej. una fecha fuera de rango): pasarlo a SIN_CLASIFICAR no lo arregla.
+    const ingestar = async (pool: Parameters<typeof ingestarCorreo>[0], c: CorreoEntrante) => {
+      if (c.messageId === '<t8-veneno@x>' && c.recibidoEn) throw errorSql('RequestError', { number: 242 });
+      return ingestarCorreo(pool, c);
+    };
+    const o = opciones({ maxIntentos: 2, ingestar });
+    const intentos = new Intentos();
+
+    // 2 intentos normales + 1 SIN_CLASIFICAR con todos los datos: fallan y el ciclo no pasa del correo.
+    for (let i = 0; i < 3; i++) {
+      const err = await sincronizar(db.pool, b.fuente(), o, intentos).catch((e: unknown) => e);
+      expect((err as ErrorSincronizacion).uid).toBe(veneno);
+      expect(await correosCon('<t8-')).toBe(1);
+    }
+
+    expect(await sincronizar(db.pool, b.fuente(), o, intentos)).toMatchObject({ revisados: 2, nuevos: 1, respaldos: 1 });
+    expect(await correosCon('<t8-')).toBe(3);
+    expect(await leerCheckpoint(db.pool, o.cuenta)).toEqual({ uidValidity: 1, ultimoUid: 3 });
+    const [g] = await db.q<{ remitente: string; asunto: string; cuerpo: string }>(
+      `SELECT remitente, asunto, cuerpo FROM CORREOS WHERE messageId = '<t8-veneno@x>'`,
+    );
+    expect(g).toMatchObject({ remitente: 'desconocido@invalid', asunto: `(correo no guardado) UID ${veneno}` });
+    // Los datos originales y la causa quedan como texto para que un humano lo encuentre en el buzón.
+    for (const texto of [`UID ${veneno}`, 'ana@mail.com', 'Fuga en el baño', 'RequestError 242']) expect(g!.cuerpo).toContain(texto);
+    expect(await categoriaDe('<t8-veneno@x>')).toBe('SIN_CLASIFICAR');
+  });
+
+  it('un mensaje que el servidor se niega a entregar se registra sin contenido tras maxIntentos y el buzón sigue', async () => {
+    const b = new BuzonFalso();
+    b.agregar(mensajeCrudo({ id: '<t9-a@x>' }), haceDias(1));
+    const roto = b.agregar(mensajeCrudo({ id: '<t9-roto@x>' }), haceDias(1));
+    b.agregar(mensajeCrudo({ id: '<t9-c@x>' }), haceDias(1));
+    b.rechazados.add(roto);
+    const o = opciones({ maxIntentos: 2 });
+    const intentos = new Intentos();
+
+    for (let i = 0; i < 2; i++) {
+      const err = await sincronizar(db.pool, b.fuente(), o, intentos).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ErrorSincronizacion);
+      expect((err as ErrorSincronizacion).uid).toBe(roto);
+      expect(await correosCon('<t9-')).toBe(1);
+    }
+
+    expect(await sincronizar(db.pool, b.fuente(), o, intentos)).toMatchObject({ revisados: 2, nuevos: 1, respaldos: 1 });
+    expect(await correosCon('<t9-')).toBe(2);
+    expect(await leerCheckpoint(db.pool, o.cuenta)).toEqual({ uidValidity: 1, ultimoUid: 3 });
+    const { messageId } = correoNoDescargable({ cuenta: o.cuenta, uidValidity: 1, uid: roto });
+    const [g] = await db.q<{ asunto: string; cuerpo: string }>(`SELECT asunto, cuerpo FROM CORREOS WHERE messageId = '${messageId}'`);
+    expect(g!.asunto).toBe(`(correo no descargable) UID ${roto}`);
+    expect(g!.cuerpo).toContain(`UID ${roto}`);
+    expect(g!.cuerpo).toContain('ErrorDescarga (Error IMAP NO)');
+    expect(await categoriaDe(messageId)).toBe('SIN_CLASIFICAR');
+  });
+
+  it('un corte de conexión al descargar no cuenta como intento: al volver, el correo se guarda completo', async () => {
+    const b = new BuzonFalso();
+    const uid = b.agregar(mensajeCrudo({ id: '<t10-a@x>', asunto: 'Robo de bicicleta', cuerpo: 'Revisen las cámaras' }), haceDias(1));
+    b.cortes.add(uid);
+    const o = opciones({ maxIntentos: 1 });
+    const intentos = new Intentos();
+    for (let i = 0; i < 3; i++) await expect(sincronizar(db.pool, b.fuente(), o, intentos)).rejects.toMatchObject({ code: 'NoConnection' });
+    expect(intentos.de(`1:${uid}`)).toBe(0);
+
+    b.cortes.clear();
+    expect(await sincronizar(db.pool, b.fuente(), o, intentos)).toMatchObject({ nuevos: 1, respaldos: 0 });
+    expect(await categoriaDe('<t10-a@x>')).toBe('SEGURIDAD');
   });
 
   it('un MIME que no se puede interpretar se guarda igual como respaldo SIN_CLASIFICAR (regla 8)', async () => {

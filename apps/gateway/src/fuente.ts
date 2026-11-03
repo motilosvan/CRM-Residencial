@@ -15,6 +15,21 @@ export interface EstadoBuzon {
 }
 
 /**
+ * El servidor se negó a entregar ESTE mensaje (FETCH respondió NO/BAD). Puede repetirse en cada ciclo
+ * (Gmail lo hace con mensajes dañados), así que cuenta como intento fallido del correo. Un corte de
+ * conexión NO se reporta así: es un error cualquiera y no cuenta como intento.
+ */
+export class ErrorDescarga extends Error {
+  override name = 'ErrorDescarga';
+  constructor(
+    readonly uid: number,
+    readonly causa: unknown,
+  ) {
+    super(`El servidor rechazó la descarga del UID ${uid}`);
+  }
+}
+
+/**
  * Lo que el ciclo de sincronización necesita de un buzón. La implementación real es IMAP (Gmail);
  * las pruebas usan un buzón en memoria. Una instancia = una conexión = un ciclo: quien la usa llama a
  * `cerrar()` siempre, también si `abrir()` falló a mitad (puede haber quedado una sesión abierta).
@@ -25,11 +40,30 @@ export interface FuenteCorreo {
   uidsDesde(fecha: Date): Promise<number[]>;
   /** UIDs ascendentes estrictamente mayores que `uid`. */
   uidsMayoresQue(uid: number): Promise<number[]>;
-  /** null si el mensaje desapareció entre la búsqueda y la descarga. */
+  /**
+   * null si el mensaje desapareció entre la búsqueda y la descarga. Lanza `ErrorDescarga` si el servidor
+   * rechaza ese mensaje en particular; cualquier otro error es de conexión.
+   */
   descargar(uid: number): Promise<MensajeCrudo | null>;
   marcarLeido(uid: number): Promise<void>;
   /** Idempotente y seguro tras un `abrir()` fallido. */
   cerrar(): Promise<void>;
+}
+
+/** Códigos de respuesta IMAP que indican un problema pasajero del servidor, no del mensaje. */
+const RESPUESTAS_PASAJERAS = new Set(['UNAVAILABLE', 'INUSE', 'LIMIT', 'THROTTLED']);
+
+/**
+ * ¿El servidor rechazó el comando por el mensaje (NO/BAD) y no por estar ocupado o caído?
+ * imapflow deja `responseStatus` en los rechazos; un corte de conexión trae `code` (NoConnection,
+ * ECONNRESET...) y ningún `responseStatus` NO/BAD.
+ */
+export function esRechazoDelMensaje(err: unknown): boolean {
+  const e = err as { responseStatus?: string; responseText?: string; serverResponseCode?: string; code?: string } | null;
+  if (e?.responseStatus !== 'NO' && e?.responseStatus !== 'BAD') return false;
+  if (e.code === 'ETHROTTLE') return false;
+  const codigo = e.serverResponseCode ?? /\[([A-Z-]+)/i.exec(e.responseText ?? '')?.[1];
+  return !(codigo && RESPUESTAS_PASAJERAS.has(codigo.toUpperCase()));
 }
 
 /**
@@ -90,7 +124,12 @@ export class FuenteImap implements FuenteCorreo {
   }
 
   async descargar(uid: number): Promise<MensajeCrudo | null> {
-    const m = await this.c.fetchOne(String(uid), { source: true, internalDate: true }, { uid: true });
+    let m;
+    try {
+      m = await this.c.fetchOne(String(uid), { source: true, internalDate: true }, { uid: true });
+    } catch (err) {
+      throw esRechazoDelMensaje(err) ? new ErrorDescarga(uid, err) : err;
+    }
     if (!m || !m.source) return null;
     const fecha = m.internalDate ? new Date(m.internalDate) : undefined;
     return { uid, fuente: m.source, fechaInterna: fecha && !Number.isNaN(fecha.getTime()) ? fecha : undefined };

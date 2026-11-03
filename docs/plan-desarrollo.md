@@ -83,12 +83,13 @@ Decisiones que afectan a las semanas siguientes:
 
 ## Semana 3 — Email Gateway  (hito M3)
 
-**Estado: S3-01 a S3-03 completas** (216 pruebas en total). Código en `apps/gateway`. Decisiones:
+**Estado: S3-01 a S3-03 completas** (229 pruebas en total). Código en `apps/gateway`. Decisiones:
 
 - La fuente IMAP está detrás de la interfaz `FuenteCorreo`. Las pruebas usan un buzón en memoria contra SQL Server real, en lugar de un servidor IMAP simulado. El caso borde `UID n:*` tiene su propia prueba.
 - La primera lectura de una cuenta se limita a `IMAP_DIAS_INICIALES`; nunca se trae todo el historial. La clave del checkpoint es `usuario/carpeta`, porque los UID son por carpeta.
 - Marcar leído es opcional (`IMAP_MARCAR_LEIDO`, apagado por defecto). Si está apagado, el buzón se abre en solo lectura.
-- Los fallos de infraestructura (BD caída) no cuentan como intento: solo los fallos propios del correo llevan al respaldo `SIN_CLASIFICAR` (T1 con `sinClasificar`).
+- Los fallos de infraestructura (BD caída, corte de IMAP) no cuentan como intento: solo los fallos propios del correo llevan al respaldo `SIN_CLASIFICAR` (T1 con `sinClasificar`).
+- Un correo que falla siempre no puede bloquear el buzón (se procesa en orden). La escalada tiene tres pasos: tras `IMAP_MAX_INTENTOS` fallos se guarda `SIN_CLASIFICAR` con todos los datos. Si aun así falla, se guarda un registro mínimo: Message-ID, valores del gateway y los datos originales como texto. Si el servidor se niega a entregar un mensaje (FETCH `NO`/`BAD`), tras `IMAP_MAX_INTENTOS` rechazos se registra sin contenido, con un Message-ID estable derivado de cuenta, UIDVALIDITY y UID.
 - Por adelantado de S4/S5: API Fastify de **solo lectura** (`/api/correos`, `/api/correos/:id`, `/api/gateway/estado`) y la pantalla del buzón en `apps/web` conectada a ella. El frontend de `main` (React/Vite) vive en `apps/web` con su propio `package.json`.
 
 | ID | Tarea | Agente | Aceptación |

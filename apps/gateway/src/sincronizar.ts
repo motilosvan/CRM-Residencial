@@ -1,8 +1,8 @@
 import type sql from 'mssql';
 import { leerCheckpoint } from '../../api/src/modules/consultas.js';
 import { ingestarCorreo, type CorreoEntrante, type ResultadoIngesta } from '../../api/src/modules/ingesta.js';
-import type { FuenteCorreo } from './fuente.js';
-import { aCorreoEntrante, correoDeRespaldo, type Contexto } from './parseo.js';
+import { ErrorDescarga, type FuenteCorreo, type MensajeCrudo } from './fuente.js';
+import { aCorreoEntrante, correoDeRespaldo, correoMinimo, correoNoDescargable, type Contexto } from './parseo.js';
 
 export interface OpcionesSincronizacion {
   /** Clave del checkpoint (usuario/buzón). */
@@ -22,7 +22,7 @@ export interface ResultadoSincronizacion {
   revisados: number;
   nuevos: number;
   duplicados: number;
-  /** Guardados SIN_CLASIFICAR por MIME ilegible o por superar el máximo de intentos. */
+  /** Guardados SIN_CLASIFICAR por MIME ilegible o por superar el máximo de intentos (incluye registros mínimos y no descargables). */
   respaldos: number;
   /** Quedaron correos para el siguiente ciclo (se alcanzó maxPorCiclo). */
   pendientes: boolean;
@@ -30,12 +30,16 @@ export interface ResultadoSincronizacion {
 
 /** Fallos por correo (clave uidValidity:uid). Vive en memoria del proceso, entre ciclos. */
 export class Intentos {
-  private readonly fallos = new Map<string, number>();
+  private readonly fallos = new Map<string, { n: number; causa: string }>();
   de(clave: string): number {
-    return this.fallos.get(clave) ?? 0;
+    return this.fallos.get(clave)?.n ?? 0;
   }
-  sumar(clave: string): void {
-    this.fallos.set(clave, this.de(clave) + 1);
+  /** Tipo y código del último fallo: se anota en el registro de último recurso. */
+  causa(clave: string): string | undefined {
+    return this.fallos.get(clave)?.causa;
+  }
+  sumar(clave: string, causa: string): void {
+    this.fallos.set(clave, { n: this.de(clave) + 1, causa });
   }
   limpiar(clave: string): void {
     this.fallos.delete(clave);
@@ -64,10 +68,31 @@ export function esFalloDeInfraestructura(err: unknown): boolean {
   return e?.name === 'ConnectionError' || (e?.code !== undefined && CODIGOS_INFRAESTRUCTURA.has(e.code));
 }
 
-/** Descripción para el log: tipo y código, nunca el mensaje completo (puede traer datos del correo). */
+/**
+ * Descripción para el log: tipo y código (y estado IMAP), nunca el mensaje completo ni el texto de la
+ * respuesta del servidor (pueden traer datos del correo).
+ */
 export function describirError(err: unknown): string {
-  const e = err as { name?: string; code?: string; number?: number } | null;
-  return [e?.name ?? 'Error', e?.code ?? e?.number].filter((x) => x !== undefined).join(' ');
+  if (err instanceof ErrorDescarga) return `${err.name} (${describirError(err.causa)})`;
+  const e = err as { name?: string; code?: string; number?: number; responseStatus?: string; serverResponseCode?: string } | null;
+  return [
+    e?.name ?? 'Error',
+    e?.code ?? e?.number,
+    e?.responseStatus ? `IMAP ${e.responseStatus}` : undefined,
+    e?.serverResponseCode ? `[${e.serverResponseCode}]` : undefined,
+  ]
+    .filter((x) => x !== undefined)
+    .join(' ');
+}
+
+/** Descarga un mensaje. Si el servidor rechaza ESE mensaje, devuelve el error (cuenta como intento); un corte de conexión se propaga. */
+async function descargar(fuente: FuenteCorreo, uid: number): Promise<MensajeCrudo | ErrorDescarga | null> {
+  try {
+    return await fuente.descargar(uid);
+  } catch (err) {
+    if (err instanceof ErrorDescarga) return err;
+    throw err;
+  }
 }
 
 /**
@@ -76,7 +101,9 @@ export function describirError(err: unknown): string {
  * - si el proceso muere a mitad, el siguiente ciclo sigue justo después del último correo guardado;
  * - si un correo se relee (checkpoint perdido, UIDVALIDITY nuevo), T1 lo detecta por Message-ID y no lo duplica.
  * Un correo que falla detiene el ciclo (no se salta: el orden protege el checkpoint) y se reintenta en el
- * siguiente; tras `maxIntentos` fallos se guarda SIN_CLASIFICAR para no bloquear el buzón.
+ * siguiente. Para no bloquear el buzón para siempre (regla 8), tras `maxIntentos` fallos propios del correo
+ * se guarda SIN_CLASIFICAR; si tampoco, un registro mínimo. Un mensaje que el servidor no entrega se
+ * registra sin contenido tras `maxIntentos` rechazos. Los fallos de conexión o de BD no cuentan.
  */
 export async function sincronizar(
   pool: sql.ConnectionPool,
@@ -109,30 +136,55 @@ export async function sincronizar(
     res.pendientes = uids.length > lote.length;
 
     for (const uid of lote) {
-      const msg = await fuente.descargar(uid);
-      if (!msg) continue; // se borró entre la búsqueda y la descarga: no hay nada que guardar
+      const msg = await descargar(fuente, uid);
+      if (msg === null) continue; // se borró entre la búsqueda y la descarga: no hay nada que guardar
       res.revisados++;
-      const ctx: Contexto = { cuenta: opts.cuenta, uidValidity: buzon.uidValidity, uid, fechaInterna: msg.fechaInterna };
+      const ctx: Contexto = {
+        cuenta: opts.cuenta,
+        uidValidity: buzon.uidValidity,
+        uid,
+        fechaInterna: msg instanceof ErrorDescarga ? undefined : msg.fechaInterna,
+      };
       const clave = `${buzon.uidValidity}:${uid}`;
+      const fallos = intentos.de(clave);
 
+      // Escalada para un correo que falla siempre. Como se procesa en orden, no se puede saltar: cada
+      // escalón quita algo de lo que podría estar fallando, hasta guardar solo valores del gateway.
       let correo: CorreoEntrante;
       let respaldo = false;
-      try {
-        correo = await parsear(msg.fuente, ctx);
-      } catch {
-        correo = correoDeRespaldo(msg.fuente, ctx); // MIME ilegible: fallará igual siempre, no se reintenta
+      if (msg instanceof ErrorDescarga) {
+        if (fallos < opts.maxIntentos) {
+          intentos.sumar(clave, describirError(msg));
+          throw new ErrorSincronizacion(uid, msg);
+        }
+        log(`UID ${uid}: el servidor no lo entrega tras ${fallos} intentos; se registra sin contenido (SIN_CLASIFICAR)`);
+        correo = correoNoDescargable(ctx, intentos.causa(clave));
         respaldo = true;
-      }
-      if (intentos.de(clave) >= opts.maxIntentos) {
-        correo = { ...correo, sinClasificar: true };
-        respaldo = true;
+      } else {
+        try {
+          correo = await parsear(msg.fuente, ctx);
+        } catch {
+          correo = correoDeRespaldo(msg.fuente, ctx); // MIME ilegible: fallará igual siempre, no se reintenta
+          respaldo = true;
+        }
+        if (fallos === opts.maxIntentos) {
+          // 1) Sin clasificar, con todos los datos.
+          log(`UID ${uid}: falló ${fallos} veces; se guarda SIN_CLASIFICAR`);
+          correo = { ...correo, sinClasificar: true };
+          respaldo = true;
+        } else if (fallos > opts.maxIntentos) {
+          // 2) Ni así: solo lo que genera el gateway; los datos originales van como texto en el cuerpo.
+          log(`UID ${uid}: tampoco se pudo guardar SIN_CLASIFICAR; se guarda un registro mínimo`);
+          correo = correoMinimo(correo, ctx, intentos.causa(clave));
+          respaldo = true;
+        }
       }
 
       let r: ResultadoIngesta;
       try {
         r = await ingestar(pool, correo);
       } catch (err) {
-        if (!esFalloDeInfraestructura(err)) intentos.sumar(clave);
+        if (!esFalloDeInfraestructura(err)) intentos.sumar(clave, describirError(err));
         throw new ErrorSincronizacion(uid, err);
       }
       intentos.limpiar(clave);

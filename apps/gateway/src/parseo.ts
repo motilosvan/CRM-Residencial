@@ -84,3 +84,55 @@ export function correoDeRespaldo(fuente: Buffer, ctx: Contexto): CorreoEntrante 
     checkpoint: checkpointDe(ctx),
   };
 }
+
+/** Dónde encontrar el original: un humano lo busca en el buzón con estos datos. */
+const ubicacion = (ctx: Contexto) => `Buzón ${ctx.cuenta} · UIDVALIDITY ${ctx.uidValidity} · UID ${ctx.uid}`;
+
+/**
+ * Último recurso (regla 8) para un correo que no se pudo guardar ni completo ni como SIN_CLASIFICAR.
+ * No se sabe qué dato lo hace fallar, así que solo se guardan valores que genera el gateway, más el
+ * Message-ID, del que depende la idempotencia. Los datos originales quedan como texto en el cuerpo.
+ */
+export function correoMinimo(original: CorreoEntrante, ctx: Contexto, causa?: string): CorreoEntrante {
+  const fecha = fechaValida(original.recibidoEn)?.toISOString() ?? 'desconocida';
+  return {
+    messageId: original.messageId,
+    imapUid: ctx.uid,
+    asunto: `(correo no guardado) UID ${ctx.uid}`,
+    cuerpo: [
+      'El gateway no pudo guardar este correo tras varios intentos. Se registra para que no se pierda:',
+      'revise el original en el buzón.',
+      ubicacion(ctx),
+      ...(causa ? [`Último error: ${causa}`] : []),
+      '',
+      `Message-ID: ${original.messageId}`,
+      `De: ${original.remitente ?? '(sin remitente)'}`,
+      `Asunto: ${original.asunto ?? ''}`,
+      `Fecha: ${fecha}`,
+    ].join('\n'),
+    sinClasificar: true,
+    checkpoint: checkpointDe(ctx),
+  };
+}
+
+/**
+ * Último recurso (regla 8) para un mensaje que el servidor se niega a entregar: queda constancia aunque
+ * no haya contenido. Sin contenido no hay Message-ID, así que se deriva uno estable de la cuenta, la
+ * UIDVALIDITY y el UID: guardarlo otra vez no lo duplica.
+ */
+export function correoNoDescargable(ctx: Contexto, causa?: string): CorreoEntrante {
+  const id = sha256(Buffer.from(`${ctx.cuenta}\n${ctx.uidValidity}\n${ctx.uid}`, 'utf8'));
+  return {
+    messageId: `<sin-descarga.${id}@soc-crm.gateway>`,
+    imapUid: ctx.uid,
+    asunto: `(correo no descargable) UID ${ctx.uid}`,
+    cuerpo: [
+      'El servidor de correo se negó a entregar este mensaje tras varios intentos. Se registra para que no',
+      'se pierda: revise el original en el buzón.',
+      ubicacion(ctx),
+      ...(causa ? [`Último error: ${causa}`] : []),
+    ].join('\n'),
+    sinClasificar: true,
+    checkpoint: checkpointDe(ctx),
+  };
+}
