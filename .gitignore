@@ -19,3 +19,6 @@ opencode.json
 opencode.jsonc
 .opencode/
 .claude/
+
+# Salidas de compilación
+dist/
