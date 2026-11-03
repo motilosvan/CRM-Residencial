@@ -8,6 +8,11 @@ export class BuzonFalso {
   uidValidity = 1;
   readonly mensajes: { uid: number; fuente: Buffer; fecha: Date }[] = [];
   readonly leidos = new Set<number>();
+  /** Si se define, `abrir()` falla con este error (p. ej. la carpeta no existe). */
+  falloAlAbrir: Error | null = null;
+  /** Conexiones abiertas (o intentadas) y conexiones cerradas: deben coincidir al terminar cada ciclo. */
+  aperturas = 0;
+  cierres = 0;
   private siguiente = 1;
 
   agregar(fuente: Buffer, fecha: Date): number {
@@ -26,7 +31,11 @@ export class BuzonFalso {
   /** Una conexión nueva, como hace el gateway en cada ciclo. */
   fuente(): FuenteCorreo {
     return {
-      abrir: async () => ({ uidValidity: this.uidValidity, uidNext: this.siguiente }),
+      abrir: async () => {
+        this.aperturas++;
+        if (this.falloAlAbrir) throw this.falloAlAbrir;
+        return { uidValidity: this.uidValidity, uidNext: this.siguiente };
+      },
       uidsDesde: async (fecha) => this.mensajes.filter((m) => m.fecha >= fecha).map((m) => m.uid),
       uidsMayoresQue: async (uid) => this.mensajes.filter((m) => m.uid > uid).map((m) => m.uid),
       descargar: async (uid) => {
@@ -36,7 +45,9 @@ export class BuzonFalso {
       marcarLeido: async (uid) => {
         this.leidos.add(uid);
       },
-      cerrar: async () => {},
+      cerrar: async () => {
+        this.cierres++;
+      },
     };
   }
 }
