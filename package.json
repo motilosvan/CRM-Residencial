@@ -14,10 +14,12 @@
     "test": "vitest run",
     "gate": "npm run db:migrate && npm run lint && npm run typecheck && npm run test",
     "demo": "tsx apps/api/src/demo/server.ts",
-    "gateway": "tsx apps/gateway/src/main.ts"
+    "gateway": "tsx apps/gateway/src/main.ts",
+    "api": "tsx apps/api/src/server.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
+    "fastify": "^5.12.8",
     "imapflow": "^2.10.0",
     "mailparser": "^3.14.1",
     "mssql": "^11.0.1",
