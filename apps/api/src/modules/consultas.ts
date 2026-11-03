@@ -120,6 +120,160 @@ export async function detalleSolicitud(pool: sql.ConnectionPool, idSolicitud: nu
   );
 }
 
+/* ---------------------------------------------------------------------------------------------
+ * Buzón: los correos tal como llegaron (de cualquier fuente: gateway IMAP, ingesta manual), con el
+ * residente vinculado y la solicitud que generaron. Es la vista "bandeja de entrada" del panel.
+ * ------------------------------------------------------------------------------------------- */
+
+const BUZON = `
+  SELECT c.idCorreo AS id, c.remitente, c.asunto, c.fechaRecepcion,
+         c.idResidente, r.nombre AS residente, r.unidad,
+         s.idSolicitud, 'SOL-' + RIGHT('000000' + CAST(s.idSolicitud AS VARCHAR(10)), 6) AS codigo,
+         e.nombre AS estado, cat.nombre AS categoria, p.nombre AS prioridad`;
+
+const BUZON_FROM = `
+    FROM CORREOS c
+    LEFT JOIN RESIDENTES r ON r.idResidente = c.idResidente
+    LEFT JOIN SOLICITUDES s ON s.idCorreo = c.idCorreo
+    LEFT JOIN ESTADOS e ON e.idEstado = s.idEstado
+    LEFT JOIN CATEGORIAS cat ON cat.idCategoria = s.idCategoria
+    LEFT JOIN PRIORIDADES p ON p.idPrioridad = s.idPrioridad`;
+
+const BUZON_FILTRO = `
+   WHERE (@patron IS NULL OR c.asunto LIKE @patron ESCAPE '\\' OR c.remitente LIKE @patron ESCAPE '\\'
+          OR r.nombre LIKE @patron ESCAPE '\\')`;
+
+export interface FilaCorreo {
+  id: number;
+  remitente: string;
+  asunto: string | null;
+  fechaRecepcion: Date;
+  idResidente: number | null;
+  residente: string | null;
+  unidad: string | null;
+  idSolicitud: number | null;
+  codigo: string | null;
+  estado: Estado | null;
+  categoria: string | null;
+  prioridad: string | null;
+}
+
+export const FiltroCorreosSchema = z.object({
+  /** Texto libre: busca en asunto, remitente y nombre del residente. */
+  q: z.string().trim().max(200).optional(),
+  limite: z.number().int().min(1).max(200).default(50),
+  desplazamiento: z.number().int().min(0).default(0),
+});
+export type FiltroCorreos = z.input<typeof FiltroCorreosSchema>;
+
+/** `%`, `_` y `[` son comodines de LIKE: se escapan para que el texto se busque literal. */
+function patronLike(q: string | undefined): string | null {
+  return q ? `%${q.replace(/[\\%_[]/g, (m) => `\\${m}`)}%` : null;
+}
+
+/** Bandeja de entrada: correos más recientes primero, con búsqueda y paginación. */
+export async function listarCorreos(
+  pool: sql.ConnectionPool,
+  filtro: FiltroCorreos = {},
+): Promise<{ total: number; correos: (FilaCorreo & { extracto: string })[] }> {
+  const f = validar(FiltroCorreosSchema, filtro);
+  const patron = patronLike(f.q);
+  return withTx(
+    pool,
+    async (tx) => {
+      const total = (
+        await tx
+          .request()
+          .input('patron', sql.NVarChar(450), patron)
+          .query<{ total: number }>(`SELECT COUNT(*) AS total ${BUZON_FROM} ${BUZON_FILTRO}`)
+      ).recordset[0]!.total;
+      const correos = (
+        await tx
+          .request()
+          .input('patron', sql.NVarChar(450), patron)
+          .input('lim', sql.Int, f.limite)
+          .input('desp', sql.Int, f.desplazamiento)
+          .query<FilaCorreo & { extracto: string }>(
+            `${BUZON}, LEFT(COALESCE(c.cuerpo, N''), 200) AS extracto ${BUZON_FROM} ${BUZON_FILTRO}
+              ORDER BY c.fechaRecepcion DESC, c.idCorreo DESC
+              OFFSET @desp ROWS FETCH NEXT @lim ROWS ONLY`,
+          )
+      ).recordset;
+      return { total, correos };
+    },
+    { isolation: 'SNAPSHOT' },
+  );
+}
+
+/** Un correo completo (cuerpo incluido). */
+export async function detalleCorreo(pool: sql.ConnectionPool, idCorreo: number): Promise<FilaCorreo & { cuerpo: string }> {
+  const id = validar(z.number().int().positive(), idCorreo);
+  return withTx(
+    pool,
+    async (tx) => {
+      const fila = (
+        await tx
+          .request()
+          .input('id', sql.Int, id)
+          .query<FilaCorreo & { cuerpo: string }>(
+            `${BUZON}, COALESCE(c.cuerpo, N'') AS cuerpo ${BUZON_FROM} WHERE c.idCorreo = @id`,
+          )
+      ).recordset[0];
+      if (!fila) throw new NotFound(`El correo ${id} no existe`);
+      return fila;
+    },
+    { isolation: 'SNAPSHOT' },
+  );
+}
+
+/** Checkpoint IMAP de una cuenta (T6), o null si el gateway nunca la ha leído. BIGINT llega como texto. */
+export async function leerCheckpoint(
+  pool: sql.ConnectionPool,
+  cuenta: string,
+): Promise<{ uidValidity: number; ultimoUid: number } | null> {
+  const c = validar(z.string().min(1).max(255), cuenta);
+  return withTx(
+    pool,
+    async (tx) => {
+      const fila = (
+        await tx
+          .request()
+          .input('cuenta', sql.NVarChar(255), c)
+          .query<{ uidValidity: string; ultimoUid: string }>(
+            'SELECT uidValidity, ultimoUid FROM GATEWAY_CHECKPOINT WHERE cuenta = @cuenta',
+          )
+      ).recordset[0];
+      return fila ? { uidValidity: Number(fila.uidValidity), ultimoUid: Number(fila.ultimoUid) } : null;
+    },
+    { isolation: 'SNAPSHOT' },
+  );
+}
+
+/** Estado del gateway para el panel: cuentas leídas, último avance y volumen del buzón. */
+export async function estadoGateway(pool: sql.ConnectionPool) {
+  return withTx(
+    pool,
+    async (tx) => {
+      const cuentas = (
+        await tx
+          .request()
+          .query<{ cuenta: string; ultimoUid: string; actualizadoEn: Date }>(
+            'SELECT cuenta, ultimoUid, actualizadoEn FROM GATEWAY_CHECKPOINT ORDER BY cuenta',
+          )
+      ).recordset.map((c) => ({ ...c, ultimoUid: Number(c.ultimoUid) }));
+      const buzon = (
+        await tx
+          .request()
+          .query<{ totalCorreos: number; ultimoCorreo: Date | null }>(
+            'SELECT COUNT(*) AS totalCorreos, MAX(fechaRecepcion) AS ultimoCorreo FROM CORREOS',
+          )
+      ).recordset[0]!;
+      return { cuentas, ...buzon };
+    },
+    { isolation: 'SNAPSHOT' },
+  );
+}
+
 /**
  * Indicadores (antesala de T5). Carga = asignaciones vigentes de solicitudes no finales.
  * Tiempo de respuesta en minutos hasta la primera respuesta, y % dentro del SLA de su prioridad.
