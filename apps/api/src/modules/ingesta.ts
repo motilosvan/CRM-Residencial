@@ -42,6 +42,11 @@ export const CorreoEntranteSchema = z.object({
   asunto: z.string().default('').transform((s) => truncarUtf16(s, LIMITE_ASUNTO)),
   cuerpo: z.string().default('').transform((s) => truncarUtf16(s, LIMITE_CUERPO)),
   recibidoEn: z.date().optional(),
+  /**
+   * Respaldo del gateway: un correo que falló N veces se guarda SIN_CLASIFICAR/MEDIA sin pasar por
+   * el clasificador, para no bloquear el buzón (regla 8). Un humano lo reclasifica después (T4).
+   */
+  sinClasificar: z.boolean().default(false),
   /** T6: avance del checkpoint IMAP, en la MISMA transacción que el correo. */
   checkpoint: z
     .object({
@@ -111,7 +116,9 @@ export async function ingestarCorreo(
   hooks?: Hooks,
 ): Promise<ResultadoIngesta> {
   const c = CorreoEntranteSchema.parse(entrada);
-  const { categoria, prioridad } = clasificarSeguro(c.asunto, c.cuerpo);
+  const { categoria, prioridad } = c.sinClasificar
+    ? ({ categoria: 'SIN_CLASIFICAR', prioridad: 'MEDIA' } as const)
+    : clasificarSeguro(c.asunto, c.cuerpo);
 
   return withTx(pool, async (tx) => {
     let insertado;
