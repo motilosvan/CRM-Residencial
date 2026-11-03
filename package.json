@@ -13,10 +13,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "gate": "npm run db:migrate && npm run lint && npm run typecheck && npm run test",
-    "demo": "tsx apps/api/src/demo/server.ts"
+    "demo": "tsx apps/api/src/demo/server.ts",
+    "gateway": "tsx apps/gateway/src/main.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
+    "imapflow": "^2.10.0",
+    "mailparser": "^3.14.1",
     "mssql": "^11.0.1",
     "zod": "^4.6.7"
   },
