@@ -1,143 +1,38 @@
-# Sistema Organizador de Correos & CRM Residencial
+# SOC-CRM: Sistema Organizador de Correos y Capa CRM Residencial
+**Conjunto Residencial Parques del Occidente (Cll 77B # 129-70, Bogotá D.C.)**
 
-![Estado](https://img.shields.io/badge/estado-propuesta%20inicial-4e9292)
-![Versión](https://img.shields.io/badge/versión-1.0.0-123e46)
-![Tecnologías](https://img.shields.io/badge/tecnologías-HTML%20%7C%20CSS%20%7C%20JavaScript-orange)
-
-## 📌 Descripción
-
-**Sistema Organizador de Correos & CRM Residencial** es una propuesta de sistema transaccional orientada a la administración de un conjunto residencial.
-
-El proyecto busca centralizar las comunicaciones de los residentes, organizar los correos electrónicos, gestionar solicitudes y facilitar el seguimiento de la atención administrativa.
-
-Esta versión corresponde al **primer acercamiento práctico al proyecto**. Se presenta una interfaz funcional de demostración, sin conexión a base de datos ni servicios externos.
-
-## 🎯 Problemática
-
-Actualmente, la gestión de un alto volumen de correos puede generar:
-
-- Falta de organización de la información.
-- Dificultad para hacer seguimiento a las respuestas.
-- Demoras en la atención de solicitudes.
-- Información de residentes dispersa.
-- Poca trazabilidad de las comunicaciones.
-
-## 🎯 Objetivo general
-
-Implementar progresivamente un sistema estructurado para gestionar correos, facilitar respuestas rápidas y mantener registros claros de las comunicaciones y solicitudes de un conjunto residencial.
-
-## 💡 Alcance del proyecto
-
-El sistema está planteado para incorporar:
-
-1. **Bandeja de correos:** recepción centralizada y categorización.
-2. **CRM de residentes:** perfiles, unidades y datos de contacto.
-3. **Solicitudes:** tickets de mantenimiento, reservas y requerimientos.
-4. **Reportes:** indicadores de atención y eficiencia administrativa.
-5. **Control de usuarios:** permisos y trazabilidad en etapas posteriores.
-
-## 🖥️ Primera interfaz
-
-La versión actual incluye:
-
-- Dashboard administrativo.
-- Menú lateral y navegación entre módulos.
-- Resumen de indicadores.
-- Bandeja de correos.
-- Filtros y búsqueda.
-- Gestión visual de residentes.
-- Gestión visual de solicitudes.
-- Dashboard de reportes.
-- Configuración.
-- Ventanas modales para acciones principales.
-- Diseño responsive para computador y dispositivos pequeños.
-
-## 🛠️ Tecnologías
-
-Para esta primera etapa se utilizaron:
-
-- **HTML5:** estructura.
-- **CSS3:** diseño visual y responsive.
-- **JavaScript:** navegación, filtros, búsqueda y simulación de interacciones.
-
-No se utilizan frameworks ni dependencias externas.
-
-## 🚫 Elementos que todavía NO se implementan
-
-De acuerdo con el alcance de esta actividad, esta versión no contiene:
-
-- Base de datos.
-- Backend.
-- CRUD real.
-- APIs.
-- Autenticación real.
-- Envío de correos real.
-- Pruebas automatizadas.
-- Integración con servicios externos.
-
-Estos componentes serán incorporados progresivamente en las siguientes actividades.
-
-## ▶️ Ejecución local
-
-No requiere instalación.
-
-1. Descargar o clonar el repositorio.
-2. Abrir la carpeta del proyecto.
-3. Abrir `index.html` en Google Chrome, Microsoft Edge o Firefox.
-4. Navegar por los módulos utilizando el menú lateral.
-
-También puede utilizarse una extensión como **Live Server** en Visual Studio Code para una experiencia de desarrollo más cómoda.
-
-## 📁 Estructura
-
-```text
-CRM-Residencial/
-├── index.html
-├── README.md
-├── .gitignore
-├── LICENSE
-├── css/
-│   └── styles.css
-├── js/
-│   └── app.js
-├── docs/
-│   ├── alcance.md
-│   └── arquitectura.md
-└── assets/
-    └── .gitkeep
+## 1. Instalación y Ejecución Rápida
+```bash
+npm install
+npm run dev      # Inicia el servidor de desarrollo en http://localhost:5173
+npm run test     # Ejecuta las pruebas unitarias con Vitest
+npm run build    # Compila para producción con verificación estricta de TypeScript
 ```
 
-## 🗺️ Evolución prevista
+## 2. Usuarios Demo Preconfigurados
+En la pantalla `/login` (y en la barra lateral inferior del panel) cuentas con botones de cambio rápido de rol:
+- **Administrador (`administracion@parquesoccidente.demo`)**: Acceso completo a validación de IA, asignación de responsables, residentes, usuarios, catálogos, reportes y auditoría.
+- **Encargado de Soporte (`mantenimiento@parquesoccidente.demo`)**: Gestiona sus solicitudes asignadas, cambia estados y responde a residentes. Recibe bloqueo `403` si intenta acceder a validación de IA o administración.
+- **Nota de Negocio**: Los residentes **NO** tienen cuenta ni portal; solo envían correos electrónicos a `administracion@parquesoccidente.demo`.
 
-### Etapa 1 — Propuesta visual
-- [x] Crear repositorio.
-- [x] Diseñar dashboard.
-- [x] Crear navegación.
-- [x] Crear módulos visuales.
-- [x] Registrar primer commit.
+## 3. Matriz de Trazabilidad (RF01 a RF16 y RNF01 a RNF08)
 
-### Etapa 2 — Persistencia
-- [ ] Diseñar base de datos.
-- [ ] Crear tablas de residentes, correos y solicitudes.
-- [ ] Implementar backend.
-- [ ] Conectar formularios.
-
-### Etapa 3 — Sistema transaccional
-- [ ] CRUD de residentes.
-- [ ] CRUD de solicitudes.
-- [ ] Gestión de correos.
-- [ ] Autenticación y permisos.
-
-### Etapa 4 — Analítica
-- [ ] Reportes reales.
-- [ ] Indicadores.
-- [ ] Historial y trazabilidad.
-- [ ] Mejoras de seguridad.
-
-## 👨‍💻 Proyecto académico
-
-**Nombre:** Sistema Organizador de Correos & CRM Residencial  
-**Tipo:** Sistema transaccional  
-**Contexto:** Administración de conjunto residencial  
-**Versión:** 1.0.0  
-**Estado:** Propuesta visual inicial
+| Código | Requerimiento Cubierto | Archivo / Módulo |
+| :--- | :--- | :--- |
+| **RF01** | Recepción y sincronización de correos Gmail | `src/features/emails/InboxPage.tsx` |
+| **RF02** | Preprocesamiento y enmascarado de PII (Ley 1581) | `src/lib/piiMasker.ts` |
+| **RF03** | Vinculación con residentes y alerta "No registrado" | `src/data/seed.ts` + `InboxPage.tsx` |
+| **RF04** | Sugerencia de IA (categoría, prioridad, resumen, confianza) | `src/features/validation/ValidationQueuePage.tsx` |
+| **RF05** | Respaldo por reglas léxicas cuando confianza < umbral | `src/lib/keywordClassifier.ts` |
+| **RF06** | Validación humana obligatoria por el Administrador | `ValidationQueuePage.tsx` |
+| **RF07** | Trazabilidad de quién validó, cuándo y si modificó | `src/store/useAppStore.ts` |
+| **RF08** | Asignación bloqueada hasta que la solicitud sea validada | `src/features/requests/RequestsPage.tsx` |
+| **RF09** | Gestión del ciclo de 6 estados con observaciones | `src/features/requests/RequestDetailPage.tsx` |
+| **RF10** | Filtros combinables, vistas guardadas y Kanban | `RequestsPage.tsx` + `DashboardPage.tsx` |
+| **RF11** | Respuesta al residente por correo con plantillas | `RequestDetailPage.tsx` |
+| **RF12** | Línea de tiempo completa por solicitud | `RequestDetailPage.tsx` |
+| **RF13** | Directorio de residentes con desactivación e historial | `src/features/residents/ResidentsPage.tsx` |
+| **RF14** | Gestión de usuarios y control RBAC (403) | `src/features/users/UsersPage.tsx` |
+| **RF15** | Catálogos y slider del umbral de confianza IA (0-1) | `src/features/catalogs/CatalogsPage.tsx` |
+| **RF16** | Reportes y exportación real a CSV y vista PDF | `src/features/reports/ReportsPage.tsx` |
+| **RNF01-08**| Seguridad, rendimiento, accesibilidad WCAG y auditoría | `src/features/audit/AuditPage.tsx` |
