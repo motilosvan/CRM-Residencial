@@ -89,8 +89,9 @@ export async function sincronizar(
   const log = opts.log ?? (() => {});
   const res: ResultadoSincronizacion = { revisados: 0, nuevos: 0, duplicados: 0, respaldos: 0, pendientes: false };
 
-  const buzon = await fuente.abrir();
+  // abrir() va dentro del try: si falla a mitad (ya autenticado, pero sin buzón) la sesión se cierra igual.
   try {
+    const buzon = await fuente.abrir();
     const cp = await leerCheckpoint(pool, opts.cuenta);
     let uids: number[];
     if (cp && cp.uidValidity === buzon.uidValidity) {
@@ -145,6 +146,7 @@ export async function sincronizar(
     }
     return res;
   } finally {
-    await fuente.cerrar();
+    // Un fallo al cerrar no debe tapar el error del ciclo ni deshacer un ciclo exitoso (ya hubo COMMIT).
+    await fuente.cerrar().catch((err: unknown) => log(`No se pudo cerrar la conexión: ${describirError(err)}`));
   }
 }

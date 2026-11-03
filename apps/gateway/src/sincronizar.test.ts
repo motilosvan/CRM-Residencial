@@ -61,6 +61,17 @@ describe('Gateway · sincronizar', () => {
     expect(await sincronizar(db.pool, b.fuente(), o)).toMatchObject({ revisados: 1, nuevos: 1 });
     expect(await leerCheckpoint(db.pool, o.cuenta)).toEqual({ uidValidity: 1, ultimoUid: 4 });
     expect(b.leidos.size).toBe(0); // marcarLeido=false: el buzón no se toca
+    expect(b.cierres).toBe(b.aperturas); // cada ciclo cierra su conexión
+  });
+
+  it('si abrir() falla (p. ej. la carpeta no existe), la conexión se cierra igual: no se acumulan sesiones', async () => {
+    const b = new BuzonFalso();
+    b.falloAlAbrir = Object.assign(new Error('Command failed'), { responseStatus: 'NO' });
+    const o = opciones();
+    for (let i = 0; i < 3; i++) await expect(sincronizar(db.pool, b.fuente(), o)).rejects.toThrow('Command failed');
+    expect(b.aperturas).toBe(3);
+    expect(b.cierres).toBe(3);
+    expect(await leerCheckpoint(db.pool, o.cuenta)).toBeNull();
   });
 
   it('reiniciar el worker 3 veces, incluso perdiendo el checkpoint ⇒ 0 duplicados (también sin Message-ID)', async () => {

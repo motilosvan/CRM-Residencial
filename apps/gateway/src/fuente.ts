@@ -16,7 +16,8 @@ export interface EstadoBuzon {
 
 /**
  * Lo que el ciclo de sincronización necesita de un buzón. La implementación real es IMAP (Gmail);
- * las pruebas usan un buzón en memoria. Una instancia = una conexión = un ciclo.
+ * las pruebas usan un buzón en memoria. Una instancia = una conexión = un ciclo: quien la usa llama a
+ * `cerrar()` siempre, también si `abrir()` falló a mitad (puede haber quedado una sesión abierta).
  */
 export interface FuenteCorreo {
   abrir(): Promise<EstadoBuzon>;
@@ -27,6 +28,7 @@ export interface FuenteCorreo {
   /** null si el mensaje desapareció entre la búsqueda y la descarga. */
   descargar(uid: number): Promise<MensajeCrudo | null>;
   marcarLeido(uid: number): Promise<void>;
+  /** Idempotente y seguro tras un `abrir()` fallido. */
   cerrar(): Promise<void>;
 }
 
@@ -61,13 +63,20 @@ export class FuenteImap implements FuenteCorreo {
     // Sin este listener, un error de socket en segundo plano tumbaría el proceso; la operación en curso falla igual.
     cliente.on('error', () => {});
     this.cliente = cliente;
-    await cliente.connect();
-    // Si no se marcan leídos, el buzón se abre en solo lectura (EXAMINE): el gateway no altera Gmail.
-    const lock = await cliente.getMailboxLock(this.cfg.buzon, { readOnly: !this.cfg.marcarLeido });
-    this.liberar = () => lock.release();
-    const mb = cliente.mailbox;
-    if (!mb) throw new Error(`No se pudo abrir el buzón ${this.cfg.buzon}`);
-    return { uidValidity: Number(mb.uidValidity), uidNext: mb.uidNext };
+    try {
+      await cliente.connect();
+      // Si no se marcan leídos, el buzón se abre en solo lectura (EXAMINE): el gateway no altera Gmail.
+      const lock = await cliente.getMailboxLock(this.cfg.buzon, { readOnly: !this.cfg.marcarLeido });
+      this.liberar = () => lock.release();
+      const mb = cliente.mailbox;
+      if (!mb) throw new Error(`No se pudo abrir el buzón ${this.cfg.buzon}`);
+      return { uidValidity: Number(mb.uidValidity), uidNext: mb.uidNext };
+    } catch (err) {
+      // Ya autenticado pero sin buzón (IMAP_MAILBOX mal escrito...): sin esto la sesión quedaba abierta en
+      // cada ciclo y Gmail, que admite unas 15 por cuenta, terminaba rechazando todas las conexiones.
+      await this.cerrar();
+      throw err;
+    }
   }
 
   async uidsDesde(fecha: Date): Promise<number[]> {
@@ -92,10 +101,15 @@ export class FuenteImap implements FuenteCorreo {
   }
 
   async cerrar(): Promise<void> {
-    this.liberar?.();
-    this.liberar = null;
+    const liberar = this.liberar;
     const cliente = this.cliente;
+    this.liberar = null;
     this.cliente = null;
+    try {
+      liberar?.();
+    } catch {
+      // El candado muere con la conexión: lo importante es cerrarla.
+    }
     if (cliente) await cliente.logout().catch(() => cliente.close());
   }
 }
