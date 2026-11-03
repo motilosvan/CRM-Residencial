@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { esErrorDeCertificado, filtrarMayores } from './fuente.js';
-import { aCorreoEntrante, correoDeRespaldo, messageIdSintetico } from './parseo.js';
+import { aCorreoEntrante, correoDeRespaldo, correoMinimo, correoNoDescargable, messageIdSintetico } from './parseo.js';
 import { mensajeCrudo } from '../test/mensajes.js';
 
 const ctx = { cuenta: 'buzon@gmail.com/INBOX', uidValidity: 9, uid: 15 };
@@ -58,6 +58,36 @@ describe('Gateway · correoDeRespaldo (MIME ilegible)', () => {
   it('sin cabeceras utilizables usa el id sintético', () => {
     const fuente = Buffer.from('basura sin cabeceras');
     expect(correoDeRespaldo(fuente, ctx).messageId).toBe(messageIdSintetico(fuente));
+  });
+});
+
+describe('Gateway · registros de último recurso (regla 8)', () => {
+  it('correoMinimo conserva el Message-ID, descarta los datos originales y los deja como texto', async () => {
+    const original = await aCorreoEntrante(
+      mensajeCrudo({ id: '<min-1@x>', de: 'Ana <ana@mail.com>', asunto: 'Fuga 💧', cuerpo: 'detalle' }),
+      { ...ctx, fechaInterna: new Date('2026-10-02T08:30:00Z') },
+    );
+    const m = correoMinimo(original, ctx, 'RequestError 242');
+    expect(m).toMatchObject({
+      messageId: '<min-1@x>', imapUid: 15, asunto: '(correo no guardado) UID 15', sinClasificar: true,
+      checkpoint: { cuenta: ctx.cuenta, uidValidity: 9, uid: 15 },
+    });
+    expect(m.remitente).toBeUndefined(); // T1 lo guarda como desconocido@invalid
+    expect(m.recibidoEn).toBeUndefined(); // T1 usa la hora actual
+    for (const texto of ['UID 15', 'UIDVALIDITY 9', 'RequestError 242', 'ana@mail.com', 'Fuga 💧', '2026-10-02T08:30:00.000Z']) {
+      expect(m.cuerpo).toContain(texto);
+    }
+    expect(m.cuerpo).not.toContain('detalle'); // el cuerpo original no se copia: podría ser lo que falla
+  });
+
+  it('correoNoDescargable: Message-ID estable por cuenta, UIDVALIDITY y UID', () => {
+    const a = correoNoDescargable(ctx, 'ErrorDescarga (Error IMAP NO)');
+    expect(a).toMatchObject({ imapUid: 15, asunto: '(correo no descargable) UID 15', sinClasificar: true });
+    expect(a.messageId).toMatch(/^<sin-descarga\.[0-9a-f]{64}@soc-crm\.gateway>$/);
+    expect(a.cuerpo).toContain('ErrorDescarga (Error IMAP NO)');
+    expect(correoNoDescargable(ctx).messageId).toBe(a.messageId);
+    expect(correoNoDescargable({ ...ctx, uid: 16 }).messageId).not.toBe(a.messageId);
+    expect(correoNoDescargable({ ...ctx, uidValidity: 10 }).messageId).not.toBe(a.messageId);
   });
 });
 
