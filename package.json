@@ -16,8 +16,8 @@
     "demo": "tsx apps/api/src/demo/server.ts",
     "gateway": "tsx apps/gateway/src/main.ts",
     "api": "tsx apps/api/src/server.ts",
-    "web": "npm --prefix apps/web run dev",
-    "web:install": "npm --prefix apps/web install"
+    "web": "cd apps/web && npm run dev --",
+    "web:install": "cd apps/web && npm install"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
