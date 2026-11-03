@@ -11,7 +11,7 @@
 import { dbConfigFromEnv } from '../../api/src/config.js';
 import { crearPool } from '../../api/src/db/pool.js';
 import { cargarConfig, type ConfigGateway } from './config.js';
-import { esErrorDeAutenticacion, FuenteImap } from './fuente.js';
+import { esErrorDeAutenticacion, esErrorDeCertificado, FuenteImap } from './fuente.js';
 import { describirError, ErrorSincronizacion, Intentos, sincronizar } from './sincronizar.js';
 
 const unaVez = process.argv.includes('--una-vez');
@@ -64,9 +64,17 @@ while (!detener) {
       process.exitCode = 1;
       break;
     }
+    if (esErrorDeCertificado(err)) {
+      console.error('No se pudo verificar el certificado de Gmail: algo intercepta la conexión cifrada (un antivirus con ' +
+        'análisis de correo, como Avast/AVG, o un proxy). Indique a Node el certificado raíz de ese programa con ' +
+        'NODE_EXTRA_CA_CERTS (ver README) o desactive el análisis de IMAP en el antivirus. No desactive la verificación TLS.');
+      process.exitCode = 1;
+      break;
+    }
     // Solo tipo y código: el mensaje completo de un error SQL puede traer datos del correo.
     const detalle = err instanceof ErrorSincronizacion ? err.message : describirError(err);
-    log(`Ciclo interrumpido: ${detalle}. Se reintenta en ${cfg.intervaloS}s.`);
+    log(`Ciclo interrumpido: ${detalle}.${unaVez ? '' : ` Se reintenta en ${cfg.intervaloS}s.`}`);
+    if (unaVez) process.exitCode = 1;
   }
   if (unaVez && !hayMas) break;
   if (!hayMas && !detener) {

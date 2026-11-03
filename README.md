@@ -73,6 +73,18 @@ La primera lectura de una cuenta trae solo los correos de los últimos `IMAP_DIA
 Por defecto el gateway abre el buzón en solo lectura y no marca nada como leído (`IMAP_MARCAR_LEIDO`).
 Para probar las credenciales con una sola lectura: `npm run gateway -- --una-vez`.
 
+**Error `SELF_SIGNED_CERT_IN_CHAIN`:** un antivirus con análisis de correo (Avast, AVG…) o un proxy intercepta la
+conexión cifrada con Gmail. Node no usa los certificados de Windows, así que hay que indicarle el del antivirus
+antes de arrancar (en Avast: `C:\ProgramData\Avast Software\Avast\wscert.pem`):
+
+```bat
+set NODE_EXTRA_CA_CERTS=C:\ProgramData\Avast Software\Avast\wscert.pem
+npm run gateway -- --una-vez
+```
+
+Con `setx` en lugar de `set` queda guardado para las terminales nuevas. La otra opción es desactivar en el
+antivirus el análisis de IMAP. Nunca use `NODE_TLS_REJECT_UNAUTHORIZED=0`: expondría la contraseña.
+
 `npm run demo` sigue sirviendo el visor provisional en http://127.0.0.1:3100 con datos de ejemplo (BD aparte).
 
 ## 📁 Estructura
