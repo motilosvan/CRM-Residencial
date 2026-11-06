@@ -17,7 +17,8 @@
     "gateway": "tsx apps/gateway/src/main.ts",
     "api": "tsx apps/api/src/server.ts",
     "web": "cd apps/web && npm run dev --",
-    "web:install": "cd apps/web && npm install"
+    "web:install": "cd apps/web && npm install",
+    "ia": "tsx apps/worker-ia/src/main.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
