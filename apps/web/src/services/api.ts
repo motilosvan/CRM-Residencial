@@ -17,11 +17,30 @@ export interface CorreoBuzon {
   estado: string | null;
   categoria: string | null;
   prioridad: string | null;
+  sugerenciaEstado: EstadoSugerencia | null;
+  sugerenciaCategoria: string | null;
   extracto: string;
+}
+
+export type EstadoSugerencia = 'EN_REINTENTO' | 'LISTA' | 'FALLIDA';
+
+/** Lo que propuso el modelo de IA. Es solo una sugerencia: no cambia la solicitud. */
+export interface SugerenciaIA {
+  estado: EstadoSugerencia;
+  categoria: string | null;
+  prioridad: string | null;
+  resumen: string | null;
+  justificacion: string | null;
+  proveedor: string;
+  modelo: string;
+  fechaActualizacion: string;
 }
 
 export interface DetalleCorreo extends Omit<CorreoBuzon, 'extracto'> {
   cuerpo: string;
+  /** Lo enmascara el servidor: es el texto que recibe el modelo de IA. */
+  cuerpoEnmascarado: string;
+  sugerencia: SugerenciaIA | null;
 }
 
 export interface PaginaCorreos {

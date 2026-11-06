@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Inbox, RefreshCw, Search } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Inbox, RefreshCw, Search, Sparkles } from 'lucide-react';
 import { CategoryBadge, PriorityBadge } from '../../components/ui/Badges';
-import { categoriaPanel, etiquetaEstado, fechaHora, haceCuanto, prioridadPanel } from '../../lib/etiquetas';
-import { maskPII } from '../../lib/piiMasker';
-import { api, ErrorApi, type CorreoBuzon, type DetalleCorreo, type EstadoGateway } from '../../services/api';
+import { categoriaPanel, etiquetaCategoria, etiquetaEstado, fechaHora, haceCuanto, prioridadPanel } from '../../lib/etiquetas';
+import { api, ErrorApi, type CorreoBuzon, type DetalleCorreo, type EstadoGateway, type SugerenciaIA } from '../../services/api';
 
 const POR_PAGINA = 50;
 const REFRESCO_MS = 30_000;
@@ -176,6 +175,12 @@ export function InboxPage() {
                         <div className="font-mono text-xs font-bold text-[#355E3B]">{c.codigo ?? '—'}</div>
                         <div className="text-xs">{etiquetaEstado(c.estado)}</div>
                         <EtiquetaCategoria categoria={c.categoria} />
+                        {c.sugerenciaEstado === 'LISTA' && (
+                          <div className="flex items-center gap-1 text-[11px] text-[#5C645C]">
+                            <Sparkles className="w-3 h-3" />
+                            IA sugiere: {etiquetaCategoria(c.sugerenciaCategoria)}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -225,9 +230,37 @@ function EtiquetaCategoria({ categoria }: { categoria: string | null }) {
   );
 }
 
+/** Solo informa: la clasificación vigente sigue siendo la de la solicitud. */
+function BloqueSugerencia({ sugerencia }: { sugerencia: SugerenciaIA }) {
+  if (sugerencia.estado !== 'LISTA') {
+    return (
+      <p className="text-xs text-[#5C645C]">
+        {sugerencia.estado === 'FALLIDA'
+          ? 'El modelo de IA no dio una respuesta válida: se mantiene la clasificación por reglas.'
+          : 'El modelo de IA no dio una respuesta válida: se reintentará.'}
+      </p>
+    );
+  }
+  const prioridad = prioridadPanel(sugerencia.prioridad);
+  return (
+    <div className="text-xs bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-[#D5DDD0] dark:border-slate-700 space-y-2">
+      <div className="flex items-center gap-1.5 font-bold uppercase text-[#355E3B] dark:text-[#F7F6F0]">
+        <Sparkles className="w-3.5 h-3.5" />
+        Sugerencia de IA (no aplicada)
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <EtiquetaCategoria categoria={sugerencia.categoria} />
+        {prioridad && <PriorityBadge prioridad={prioridad} />}
+      </div>
+      <p className="break-words">{sugerencia.resumen}</p>
+      {sugerencia.justificacion && <p className="break-words text-[#5C645C]">{sugerencia.justificacion}</p>}
+      <p className="text-[11px] text-[#5C645C] break-all">Modelo: {sugerencia.modelo}</p>
+    </div>
+  );
+}
+
 function PanelDetalle({ correo }: { correo: DetalleCorreo }) {
   const prioridad = prioridadPanel(correo.prioridad);
-  const enmascarado = maskPII(correo.cuerpo).maskedText;
   return (
     <div className="bg-[#F7F6F0] dark:bg-slate-800 p-5 rounded-2xl border border-[#D5DDD0] dark:border-slate-700 space-y-4 self-start">
       <div className="flex items-center justify-between gap-2">
@@ -250,6 +283,7 @@ function PanelDetalle({ correo }: { correo: DetalleCorreo }) {
           {prioridad && <PriorityBadge prioridad={prioridad} />}
         </div>
       </div>
+      {correo.sugerencia && <BloqueSugerencia sugerencia={correo.sugerencia} />}
       <div>
         <span className="text-xs font-bold uppercase text-[#5C645C] block mb-1">Cuerpo original recibido:</span>
         <pre className="text-xs whitespace-pre-wrap break-words max-h-72 overflow-y-auto bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-[#D5DDD0] dark:border-slate-700 font-sans">
@@ -258,10 +292,10 @@ function PanelDetalle({ correo }: { correo: DetalleCorreo }) {
       </div>
       <div>
         <span className="text-xs font-bold uppercase text-[#789653] block mb-1">
-          Vista previa enmascarada (Ley 1581):
+          Texto enmascarado que recibe la IA (Ley 1581):
         </span>
         <pre className="text-xs whitespace-pre-wrap break-words max-h-48 overflow-y-auto bg-emerald-50/70 dark:bg-emerald-950/30 p-3 rounded-xl border border-emerald-200 font-sans">
-          {enmascarado || '(vacío)'}
+          {correo.cuerpoEnmascarado || '(vacío)'}
         </pre>
       </div>
     </div>
