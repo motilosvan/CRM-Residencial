@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["apps/api/**/*.ts", "apps/gateway/**/*.ts", "vitest.config.ts", "eslint.config.js"]
+  "include": ["apps/api/**/*.ts", "apps/gateway/**/*.ts", "apps/worker-ia/**/*.ts", "vitest.config.ts", "eslint.config.js"]
 }
