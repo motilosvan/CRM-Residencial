@@ -21,6 +21,14 @@ const URGENTES: RegExp[] = [
   /\bascensor (atascado|detenido|trabado)/, /\bsin agua\b/, /\bsin luz\b/, /\bheri/, /\bdisparo/,
 ];
 
+/**
+ * Ajusta una prioridad que no calculó este módulo (p. ej. la sugerida por una IA) a la regla del negocio:
+ * lo relacionado con seguridad nunca queda en BAJA.
+ */
+export function prioridadPermitida(categoria: Categoria, prioridad: Prioridad): Prioridad {
+  return categoria === 'SEGURIDAD' && prioridad === 'BAJA' ? 'ALTA' : prioridad;
+}
+
 /** Limitación conocida: no entiende negaciones ("esto no es urgente"). */
 export function priorizar(categoria: Categoria, asunto: string, cuerpo: string): Prioridad {
   const texto = normalizar(`${asunto} ${cuerpo}`);
