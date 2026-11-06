@@ -31,6 +31,8 @@ export const etiquetaEstado = (v: string | null) => (v ? ESTADOS[v] ?? v : '—'
 /** null para SIN_CLASIFICAR (o una categoría que el panel aún no conoce): se muestra aparte. */
 export const categoriaPanel = (v: string | null): CategoriaSolicitud | null => (v ? CATEGORIAS[v] ?? null : null);
 
+export const etiquetaCategoria = (v: string | null) => categoriaPanel(v) ?? 'Sin clasificar';
+
 export const prioridadPanel = (v: string | null): PrioridadSolicitud | null => (v ? PRIORIDADES[v] ?? null : null);
 
 export function fechaHora(iso: string): string {
