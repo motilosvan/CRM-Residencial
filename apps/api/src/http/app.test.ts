@@ -51,7 +51,7 @@ describe('API · buzón', () => {
     const { correos } = (await get('/api/correos?q=fuga')).json<{ correos: { id: number }[] }>();
     const r = await get(`/api/correos/${correos[0]!.id}`);
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toMatchObject({ cuerpo: 'Hay agua 💧', remitente: 'ana@mail.com' });
+    expect(r.json()).toMatchObject({ cuerpo: 'Hay agua 💧', cuerpoEnmascarado: 'Hay agua 💧', remitente: 'ana@mail.com', sugerencia: null });
     expect((await get('/api/correos/999999')).statusCode).toBe(404);
     expect((await get('/api/correos/abc')).statusCode).toBe(422);
   });

@@ -72,6 +72,14 @@ describe('rol crm_app (mínimo privilegio)', () => {
     }
   });
 
+  it('la aplicación puede escribir sugerencias de IA, pero no borrarlas', async () => {
+    const r = await db.q<{ id: number }>(`SELECT TOP (1) idSolicitud AS id FROM SOLICITUDES`);
+    await comoApp(`INSERT INTO SUGERENCIAS_IA (idSolicitud, estado, proveedor, modelo) VALUES (${r[0]!.id}, 'FALLIDA', 'p', 'm')`);
+    await comoApp(`UPDATE SUGERENCIAS_IA SET ultimoError = N'x'`);
+    await expect(comoApp(`DELETE FROM SUGERENCIAS_IA`)).rejects.toThrow(/permission was denied|denegado/i);
+    await db.q(`DELETE FROM SUGERENCIAS_IA`);
+  });
+
   it('nada de lo anterior tuvo efecto', async () => {
     const r = await db.q<{ n: number }>(`SELECT COUNT(*) AS n FROM HISTORIAL_ESTADOS`);
     expect(r[0]?.n).toBe(1);

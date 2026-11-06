@@ -1,6 +1,7 @@
 import sql from 'mssql';
 import { z } from 'zod';
 import { CATEGORIAS } from '../domain/clasificador.js';
+import { enmascarar } from '../domain/enmascarar.js';
 import { destinosDesde, ESTADOS, type Estado } from '../domain/estados.js';
 import { PRIORIDADES } from '../domain/priorizador.js';
 import { withTx } from '../db/withTx.js';
@@ -129,7 +130,8 @@ const BUZON = `
   SELECT c.idCorreo AS id, c.remitente, c.asunto, c.fechaRecepcion,
          c.idResidente, r.nombre AS residente, r.unidad,
          s.idSolicitud, 'SOL-' + RIGHT('000000' + CAST(s.idSolicitud AS VARCHAR(10)), 6) AS codigo,
-         e.nombre AS estado, cat.nombre AS categoria, p.nombre AS prioridad`;
+         e.nombre AS estado, cat.nombre AS categoria, p.nombre AS prioridad,
+         sug.estado AS sugerenciaEstado, catSug.nombre AS sugerenciaCategoria`;
 
 const BUZON_FROM = `
     FROM CORREOS c
@@ -137,7 +139,9 @@ const BUZON_FROM = `
     LEFT JOIN SOLICITUDES s ON s.idCorreo = c.idCorreo
     LEFT JOIN ESTADOS e ON e.idEstado = s.idEstado
     LEFT JOIN CATEGORIAS cat ON cat.idCategoria = s.idCategoria
-    LEFT JOIN PRIORIDADES p ON p.idPrioridad = s.idPrioridad`;
+    LEFT JOIN PRIORIDADES p ON p.idPrioridad = s.idPrioridad
+    LEFT JOIN SUGERENCIAS_IA sug ON sug.idSolicitud = s.idSolicitud
+    LEFT JOIN CATEGORIAS catSug ON catSug.idCategoria = sug.idCategoria`;
 
 const BUZON_FILTRO = `
    WHERE (@patron IS NULL OR c.asunto LIKE @patron ESCAPE '\\' OR c.remitente LIKE @patron ESCAPE '\\'
@@ -156,6 +160,22 @@ export interface FilaCorreo {
   estado: Estado | null;
   categoria: string | null;
   prioridad: string | null;
+  sugerenciaEstado: EstadoSugerencia | null;
+  sugerenciaCategoria: string | null;
+}
+
+export type EstadoSugerencia = 'EN_REINTENTO' | 'LISTA' | 'FALLIDA';
+
+/** Lo que un modelo de IA propuso para una solicitud. Nunca modifica la solicitud por sí solo. */
+export interface SugerenciaGuardada {
+  estado: EstadoSugerencia;
+  categoria: string | null;
+  prioridad: string | null;
+  resumen: string | null;
+  justificacion: string | null;
+  proveedor: string;
+  modelo: string;
+  fechaActualizacion: Date;
 }
 
 export const FiltroCorreosSchema = z.object({
@@ -205,8 +225,14 @@ export async function listarCorreos(
   );
 }
 
-/** Un correo completo (cuerpo incluido). */
-export async function detalleCorreo(pool: sql.ConnectionPool, idCorreo: number): Promise<FilaCorreo & { cuerpo: string }> {
+/**
+ * Un correo completo: el cuerpo, su versión enmascarada (exactamente lo que vería un tercero) y la
+ * sugerencia de IA, si existe, todo de la misma foto consistente.
+ */
+export async function detalleCorreo(
+  pool: sql.ConnectionPool,
+  idCorreo: number,
+): Promise<FilaCorreo & { cuerpo: string; cuerpoEnmascarado: string; sugerencia: SugerenciaGuardada | null }> {
   const id = validar(z.number().int().positive(), idCorreo);
   return withTx(
     pool,
@@ -220,7 +246,62 @@ export async function detalleCorreo(pool: sql.ConnectionPool, idCorreo: number):
           )
       ).recordset[0];
       if (!fila) throw new NotFound(`El correo ${id} no existe`);
-      return fila;
+      const sugerencia = (
+        await tx
+          .request()
+          .input('idSolicitud', sql.Int, fila.idSolicitud)
+          .query<SugerenciaGuardada>(
+            `SELECT g.estado, cat.nombre AS categoria, p.nombre AS prioridad, g.resumen, g.justificacion,
+                    g.proveedor, g.modelo, g.fechaActualizacion
+               FROM SUGERENCIAS_IA g
+               LEFT JOIN CATEGORIAS cat ON cat.idCategoria = g.idCategoria
+               LEFT JOIN PRIORIDADES p ON p.idPrioridad = g.idPrioridad
+              WHERE g.idSolicitud = @idSolicitud`,
+          )
+      ).recordset[0];
+      return {
+        ...fila,
+        cuerpoEnmascarado: enmascarar(fila.cuerpo, { nombres: [fila.residente] }),
+        sugerencia: sugerencia ?? null,
+      };
+    },
+    { isolation: 'SNAPSHOT' },
+  );
+}
+
+export interface SolicitudParaSugerir {
+  idSolicitud: number;
+  asunto: string;
+  cuerpo: string;
+  residente: string | null;
+}
+
+/**
+ * Solicitudes que el worker de IA debe procesar, las más antiguas primero: NUEVAS sin sugerencia o con
+ * un reintento vencido. Devuelve el texto original: enmascararlo antes de enviarlo es deber del worker.
+ */
+export async function solicitudesParaSugerir(pool: sql.ConnectionPool, limite: number): Promise<SolicitudParaSugerir[]> {
+  const lim = validar(z.number().int().min(1).max(100), limite);
+  return withTx(
+    pool,
+    async (tx) => {
+      const r = await tx
+        .request()
+        .input('lim', sql.Int, lim)
+        .query<SolicitudParaSugerir>(
+          `SELECT TOP (@lim) s.idSolicitud, COALESCE(c.asunto, N'') AS asunto, COALESCE(c.cuerpo, N'') AS cuerpo,
+                  r.nombre AS residente
+             FROM SOLICITUDES s
+             JOIN CORREOS c ON c.idCorreo = s.idCorreo
+             JOIN ESTADOS e ON e.idEstado = s.idEstado
+             LEFT JOIN RESIDENTES r ON r.idResidente = c.idResidente
+             LEFT JOIN SUGERENCIAS_IA g ON g.idSolicitud = s.idSolicitud
+            WHERE e.nombre = 'NUEVA'
+              AND (g.idSugerencia IS NULL
+                   OR (g.estado = 'EN_REINTENTO' AND g.proximoIntento <= SYSUTCDATETIME()))
+            ORDER BY s.fechaCreacion, s.idSolicitud`,
+        );
+      return r.recordset;
     },
     { isolation: 'SNAPSHOT' },
   );
