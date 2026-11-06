@@ -28,7 +28,8 @@ El foco del proyecto es la **base de datos transaccional** (SQL Server): las reg
 | Email Gateway con Gmail por IMAP (S3) | Hecho |
 | API HTTP de solo lectura para el buzón (Fastify, inicio de S4) | Hecho, sin login todavía |
 | Panel React/Vite: buzón unificado con datos reales | Hecho; las demás pantallas siguen con datos simulados |
-| 229 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
+| Sugerencias de IA vía OpenRouter u OpenCode Go (worker aparte, solo sugiere) | Hecho, apagado por defecto; aceptarlas llega con el login |
+| 311 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
 | Visor local de demostración | Provisional |
 | Login y rutas de escritura en la API (S4), resto del panel conectado (S5) | Pendiente |
 
@@ -39,6 +40,7 @@ Detalle y justificación: [`docs/estudio-funcionalidad-y-bd-transaccional.md`](d
 - **Microsoft SQL Server 2022** (Docker) — base de datos transaccional.
 - **Node.js 20+ y TypeScript** — lógica de negocio (`mssql`, `zod`) y API HTTP (`fastify`).
 - **imapflow + mailparser** — Email Gateway que lee Gmail por IMAP.
+- **OpenRouter u OpenCode Go** (opcional) — modelo para las sugerencias de clasificación.
 - **React + Vite + Tailwind** (`apps/web`) — panel administrativo.
 - **Vitest** — pruebas de integración contra SQL Server real.
 
@@ -52,7 +54,7 @@ npm install
 npm run web:install         # dependencias del panel (apps/web)
 docker compose up -d db     # SQL Server, solo accesible desde este equipo
 npm run db:migrate          # crea la BD, aplica migraciones y el login de la aplicación
-npm run gate                # migraciones + lint + tipos + 229 pruebas
+npm run gate                # migraciones + lint + tipos + 311 pruebas
 ```
 
 ### Ver el buzón unificado de Gmail
@@ -85,6 +87,32 @@ npm run gateway -- --una-vez
 Con `setx` en lugar de `set` queda guardado para las terminales nuevas. La otra opción es desactivar en el
 antivirus el análisis de IMAP. Nunca use `NODE_TLS_REJECT_UNAUTHORIZED=0`: expondría la contraseña.
 
+### Activar las sugerencias de IA
+
+El worker `npm run ia` toma las solicitudes NUEVAS, enmascara el texto en el servidor, pide una sugerencia al
+modelo y la guarda aparte en `SUGERENCIAS_IA`. **Solo sugiere:** nunca cambia una solicitud, y si está apagado
+o el modelo falla, todo sigue funcionando con la clasificación por reglas. La bandeja muestra la sugerencia y el
+texto exacto que recibe el modelo.
+
+1. Elija proveedor y cree la llave: [OpenRouter](https://openrouter.ai/keys) (gratis, pero sus modelos gratuitos
+   se saturan a ratos) u [OpenCode Go](https://opencode.ai/docs/go) (de pago desde $10/mes).
+2. En `.env`, defina `IA_PROVEEDOR` (`openrouter` u `opencode-go`) y su llave (`OPENROUTER_API_KEY` u `OPENCODE_API_KEY`).
+3. Pruebe con `npm run ia -- --una-vez` y luego déjelo corriendo con `npm run ia`.
+
+Con **OpenCode Go** se usa `glm-5.3-flash`: no entrena con los datos y tiene 0 días de retención según su
+documentación. Go no permite exigir esa política por solicitud, así que el worker solo arranca con una lista cerrada
+de modelos que la cumplen. Go está pensado para agentes de código, y sus términos limitan el uso a fines internos
+propios: sirve para desarrollo y demostración, pero revíselos antes de usarlo en producción.
+
+Con **OpenRouter**, cada solicitud exige `data_collection: deny`: si ningún proveedor del modelo cumple esa política, el worker se
+detiene y lo informa, sin enviar los datos a otro proveedor. Varios modelos gratuitos no la cumplen porque entrenan
+con los datos. El modelo se cambia con `IA_MODELO` y debe aceptar esquema JSON. OpenRouter permite 20 solicitudes por minuto a modelos gratuitos, y 50 o 1.000 al día según los
+créditos comprados; los proveedores gratuitos pueden limitar más las ráfagas. Ante un límite, el worker se pausa
+sin descontarle intentos a los correos.
+
+El enmascarado es por patrones y puede dejar pasar algún dato. Antes de usarlo con correos reales de residentes,
+revise la Ley 1581 con quien corresponda: el texto sale del país hacia un tercero.
+
 `npm run demo` sigue sirviendo el visor provisional en http://127.0.0.1:3100 con datos de ejemplo (BD aparte).
 
 ## 📁 Estructura
@@ -92,15 +120,16 @@ antivirus el análisis de IMAP. Nunca use `NODE_TLS_REJECT_UNAUTHORIZED=0`: expo
 ```text
 CRM-Residencial/
 ├── ScriptBaseDatosCRM.sql          # línea base del modelo relacional (no se edita)
-├── db/migrations/                  # 0002 … 0005: integridad, fechas, invariantes, rol de la app
+├── db/migrations/                  # 0002 … 0006: integridad, fechas, invariantes, rol de la app, sugerencias de IA
 ├── apps/api/src/
-│   ├── domain/                     # clasificador, priorizador, máquina de estados (puro)
+│   ├── domain/                     # clasificador, priorizador, enmascarado, máquina de estados (puro)
 │   ├── modules/                    # transacciones T1–T4 y consultas
 │   ├── db/                         # withTx, pool, migraciones, login de la app
 │   ├── http/, server.ts            # API HTTP (Fastify), hoy solo lectura
 │   └── demo/                       # visor provisional
 ├── apps/api/test/                  # utilidades y datos solo de pruebas
 ├── apps/gateway/                   # Email Gateway IMAP (Gmail) → T1 + checkpoint T6
+├── apps/worker-ia/                 # worker de sugerencias de IA (OpenRouter, OpenCode Go)
 ├── apps/web/                       # panel React/Vite (proyecto npm propio)
 ├── docs/                           # plan, estudio, arquitectura, alcance
 ├── AGENTS.md, opencode.jsonc, .opencode/   # flujo de desarrollo con agentes

@@ -98,6 +98,18 @@ Decisiones que afectan a las semanas siguientes:
 | S3-02 | Parseo con `mailparser`; `messageId` determinista (sha256) si falta | `gateway-dev` | Correo sin Message-ID no se pierde ni duplica |
 | S3-03 | Integración con T1/T6; marcar leído **después** del COMMIT; fallback `SIN_CLASIFICAR` tras N fallos | `gateway-dev` | Reiniciar el worker 3 veces ⇒ 0 duplicados |
 
+## Sugerencias de IA  (adelanto, fuera del plan original)
+
+**Estado: hecho hasta mostrar la sugerencia; aceptarla depende de S4-01.** Código en `apps/worker-ia`, T7 en `modules/sugerencias.ts`, migración `0006`. Decisiones:
+
+- **La IA queda fuera de T1.** Un worker aparte llama al modelo fuera de toda transacción, porque tarda segundos y `withTx` puede repetir su función. El correo siempre conserva la clasificación por reglas (regla 8).
+- **Solo sugiere.** Escribe en `SUGERENCIAS_IA`, nunca en `SOLICITUDES`: no altera `version` ni historial. Aceptar será T4, con `versionEsperada`. "Pendiente de validación" saldrá de esa tabla, sin estados nuevos.
+- **Proveedor:** OpenRouter con modelo gratuito, por decisión del equipo. Big Pickle no está en OpenRouter (es de OpenCode Zen). Probados en noviembre de 2026 con `data_collection: deny` y esquema JSON: `xingchen-agi/xing4.0-29b-a4b:free` (el predeterminado), `dots-studio/dots-3-note-preview:free` y `stealth/crouton-alpha` responden; `nvidia/nemotron-3.5-super-vl:free` y `liquid/lfm-2.5-2.6b:free` se rechazan porque entrenan con los datos. La lista cambia con el tiempo. Antes de confiar en la precisión falta medirla con correos de redacción distinta: los 34 de ejemplo no sirven porque las reglas sacan 100 % en ellos.
+- **OpenCode Go como alternativa (noviembre de 2026):** el modelo gratuito de OpenRouter responde 429 de forma intermitente (`temporarily rate-limited upstream`). Go usa `glm-5.3-flash`: sin entrenamiento, 0 días de retención, regiones por defecto y salida estructurada. Go no tiene un equivalente a `data_collection: deny`, así que `MODELOS_GO_PERMITIDOS` limita los modelos y el worker no arranca con otro. Pendiente de revisar para producción: Go está pensado para agentes de código y sus términos limitan el uso a fines internos propios.
+- **Datos:** el texto se enmascara en `domain/enmascarar.ts` y cada solicitud exige `data_collection: deny` sin alternativa más débil. El enmascarado es por patrones. Falta la revisión legal (Ley 1581) antes de usarlo con correos reales.
+- **Sin campo de confianza:** el modelo no entrega una probabilidad calibrada, así que nada se aplica por umbral.
+- **Quién falla:** un límite de solicitudes (HTTP 429) pausa el ciclo; llave, modelo o política lo detienen; fallos temporales reintentan sin descontar; solo una respuesta inválida cuenta contra el correo.
+
 ## Semana 4 — API y autenticación  (hito M4)
 
 | ID | Tarea | Agente | Aceptación |
