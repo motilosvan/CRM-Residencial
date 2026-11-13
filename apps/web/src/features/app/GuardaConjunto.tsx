@@ -44,7 +44,7 @@ export default function GuardaConjunto() {
       </div>
     );
   }
-  if (conjuntos.isError) {
+  if (conjuntos.isError && conjuntos.data === undefined) {
     return (
       <div className="p-6">
         <EstadoError alReintentar={() => void conjuntos.refetch()} />

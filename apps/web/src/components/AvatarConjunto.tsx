@@ -5,12 +5,13 @@ const PARTICULAS = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'y', 'e']);
 
 /** Hasta 2 iniciales de las palabras significativas del nombre. */
 export function iniciales(nombre: string): string {
-  return nombre
+  const letras = nombre
     .split(/\s+/)
     .filter((p) => p && !PARTICULAS.has(p.toLowerCase()))
     .slice(0, 2)
     .map((p) => p[0].toUpperCase())
     .join('');
+  return letras || '·';
 }
 
 interface Props {

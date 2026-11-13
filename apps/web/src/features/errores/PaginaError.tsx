@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { LucideIcon } from 'lucide-react';
 import { EmptyState } from '@/components/EmptyState';
@@ -8,7 +7,7 @@ import { useSesion } from '@/store/sesion';
 interface Props {
   icono: LucideIcon;
   titulo: string;
-  descripcion: ReactNode;
+  descripcion: string;
 }
 
 export function PaginaError({ icono, titulo, descripcion }: Props) {
@@ -20,7 +19,7 @@ export function PaginaError({ icono, titulo, descripcion }: Props) {
         nivel={1}
         icono={icono}
         titulo={titulo}
-        descripcion={String(descripcion)}
+        descripcion={descripcion}
         accion={
           <Button asChild>
             <Link to={destino}>{slug ? 'Volver al inicio del panel' : 'Volver al inicio'}</Link>
