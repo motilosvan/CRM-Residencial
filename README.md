@@ -132,7 +132,6 @@ CRM-Residencial/
 ├── apps/worker-ia/                 # worker de sugerencias de IA (OpenRouter, OpenCode Go)
 ├── apps/web/                       # panel React/Vite (proyecto npm propio)
 ├── docs/                           # plan, estudio, arquitectura, alcance
-├── AGENTS.md, opencode.jsonc, .opencode/   # flujo de desarrollo con agentes
 └── docker-compose.yml, .env.example
 ```
 

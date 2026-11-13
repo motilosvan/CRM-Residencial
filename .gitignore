@@ -12,13 +12,13 @@ node_modules/
 .env.*
 !.env.example
 
-# Flujo de agentes (opencode / Claude): configuración local, no se versiona
-AGENTS.md
+# Herramientas de IA (Claude Code y sus MCP/skills): configuración local, no se versiona
 CLAUDE.md
-opencode.json
-opencode.jsonc
-.opencode/
+CLAUDE.local.md
 .claude/
+.mcp.json
+.playwright-mcp/
+graphify-out/
 
 # Salidas de compilación
 dist/

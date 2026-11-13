@@ -12,7 +12,7 @@ export default tseslint.config(
     },
   },
   {
-    // Regla 2 de AGENTS.md: el dominio es puro (sin BD, sin driver, sin servidor).
+    // Regla del proyecto: el dominio es puro (sin BD, sin driver, sin servidor).
     files: ['apps/api/src/domain/**/*.ts'],
     ignores: ['apps/api/src/domain/**/*.test.ts'],
     rules: {
@@ -33,7 +33,7 @@ export default tseslint.config(
         {
           // Se permiten constantes de módulo en MAYÚSCULAS (fragmentos SQL fijos, p. ej. BANDEJA).
           selector: "CallExpression[callee.property.name=/^(query|batch)$/] > TemplateLiteral[expressions.length>0] > :expression:not(Identifier[name=/^[A-Z][A-Z0-9_]*$/])",
-          message: 'SQL con interpolación: use request.input(...) (regla 3 de AGENTS.md).',
+          message: 'SQL con interpolación: use request.input(...) (regla del proyecto).',
         },
       ],
     },
