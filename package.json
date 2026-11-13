@@ -18,6 +18,7 @@
     "api": "tsx apps/api/src/server.ts",
     "web": "cd apps/web && npm run dev --",
     "web:install": "cd apps/web && npm install",
+    "web:legacy": "cd apps/web-legacy && npm run dev --",
     "ia": "tsx apps/worker-ia/src/main.ts"
   },
   "dependencies": {
