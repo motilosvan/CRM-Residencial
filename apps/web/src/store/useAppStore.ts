@@ -123,21 +123,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   sincronizarGmail: async () => {
     await new Promise((resolve) => setTimeout(resolve, 650));
     const state = get();
-    const res = state.residentes[Math.floor(Math.random() * 10)];
+    const res =
+      state.residentes.length > 0
+        ? state.residentes[Math.floor(Math.random() * Math.min(10, state.residentes.length))]
+        : null;
     const now = new Date().toISOString();
     const id = `sol-${1001 + state.solicitudes.length}`;
     const radicado = `PCO-2025-${String(1001 + state.solicitudes.length).padStart(4, '0')}`;
-    const cuerpo = `Cordial saludo Administración. Reporto fuga de agua en el registro principal del piso 2 de la ${res.torre}. Mi celular es ${res.telefono} y mi cédula CC 80.123.998. Quedo atento en ${res.correo}.`;
+    const cuerpo = res
+      ? `Cordial saludo Administración. Reporto fuga de agua en el registro principal del piso 2 de la ${res.torre}. Mi celular es ${res.telefono} y mi cédula CC 80.123.998. Quedo atento en ${res.correo}.`
+      : 'Cordial saludo Administración. Reporto fuga de agua en el registro principal del piso 2 de la Torre 1. Mi celular es 310 445 9821 y mi cédula CC 80.123.998. Quedo atento.';
     const { maskedText } = maskPII(cuerpo);
 
     const nueva: Solicitud = {
       id,
       radicado,
       correoId: `msg-gmail-${Date.now()}`,
-      remitenteCorreo: res.correo,
-      remitenteNombre: res.nombre,
-      residenteId: res.id,
-      asunto: `URGENTE: Fuga en registro hidráulico piso 2 (${res.torre} - ${res.apartamento})`,
+      remitenteCorreo: res ? res.correo : 'vecino.nuevo@correo.com',
+      remitenteNombre: res ? res.nombre : 'Vecino Sin Registrar',
+      residenteId: res ? res.id : null,
+      asunto: res
+        ? `URGENTE: Fuga en registro hidráulico piso 2 (${res.torre} - ${res.apartamento})`
+        : 'URGENTE: Fuga en registro hidráulico piso 2 (Torre 1 - 101)',
       cuerpoOriginal: cuerpo,
       cuerpoEnmascarado: maskedText,
       fechaRecepcion: now,
@@ -146,7 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sugerencia: {
         categoria: 'Mantenimiento',
         prioridad: 'Alta',
-        resumen: `Reporte de fuga hidráulica en registro común del piso 2 (${res.torre}).`,
+        resumen: `Reporte de fuga hidráulica en registro común del piso 2 (${res ? res.torre : 'Torre 1'}).`,
         justificacion: 'Detectada palabra crítica "fuga de agua" en infraestructura común con confianza alta.',
         confianza: 0.95,
         origen: 'IA',

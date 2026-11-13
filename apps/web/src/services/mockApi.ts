@@ -84,16 +84,24 @@ export class MockGmailGatewayService implements IEmailGatewayService {
   async fetchNewIncomingEmails() {
     await simulateNetworkLatency(400, 850);
     const randomResidente =
-      RESIDENTES_SEED[Math.floor(Math.random() * RESIDENTES_SEED.length)];
+      RESIDENTES_SEED.length > 0
+        ? RESIDENTES_SEED[Math.floor(Math.random() * RESIDENTES_SEED.length)]
+        : null;
+
+    const remitenteCorreo = randomResidente ? randomResidente.correo : 'vecino@conjunto.com';
+    const remitenteNombre = randomResidente ? randomResidente.nombre : 'Residente Sin Registrar';
+    const torre = randomResidente ? randomResidente.torre : 'Torre 1';
+    const apto = randomResidente ? randomResidente.apartamento : '101';
+    const tel = randomResidente ? randomResidente.telefono : '310 000 0000';
 
     return [
       {
         correoId: `msg-gmail-${Date.now()}`,
-        remitenteCorreo: randomResidente.correo,
-        remitenteNombre: randomResidente.nombre,
-        asunto: `Reporte de daño en cerradura peatonal y citófono (${randomResidente.torre} - ${randomResidente.apartamento})`,
+        remitenteCorreo,
+        remitenteNombre,
+        asunto: `Reporte de daño en cerradura peatonal y citófono (${torre} - ${apto})`,
         cuerpoRecibido: sanitizeEmailContent(
-          `Buen día administración. Desde esta mañana el electroimán de la puerta peatonal de la ${randomResidente.torre} quedó sin fuerza. Mi celular es ${randomResidente.telefono} y mi cédula CC 79.321.654.`
+          `Buen día administración. Desde esta mañana el electroimán de la puerta peatonal de la ${torre} quedó sin fuerza. Mi celular es ${tel} y mi cédula CC 79.321.654.`
         ),
         fechaRecepcion: new Date().toISOString(),
       },

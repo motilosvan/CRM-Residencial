@@ -52,7 +52,7 @@ export function classifyByKeywords(
   let prioridad: PrioridadSolicitud = 'Baja';
   if (urgentHits.length > 0) {
     prioridad = 'Alta';
-  } else if (maxMatches >= 2 || bestCategory === 'Mantenimiento' || bestCategory === 'Facturación') {
+  } else if (maxMatches >= 2 || (bestCategory as string) === 'Mantenimiento' || (bestCategory as string) === 'Facturación') {
     prioridad = 'Media';
   }
 
