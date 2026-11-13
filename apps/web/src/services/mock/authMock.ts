@@ -57,7 +57,6 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
       if (ahora() < e.reenvioDisponibleEn) throw new ErrorAuth('REENVIO_PRONTO');
       const t = ahora();
       e.activo = true;
-      e.fallidos = 0;
       e.venceEn = t + VIGENCIA_MS;
       e.reenvioDisponibleEn = t + REENVIO_MS;
       return { venceEn: e.venceEn, reenvioDisponibleEn: e.reenvioDisponibleEn };

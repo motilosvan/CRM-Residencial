@@ -32,9 +32,9 @@ export type CodigoErrorAuth =
 
 /** Error de acceso. Los fallos de red (también en `ConjuntosService`) usan el código 'RED'. */
 export class ErrorAuth extends Error {
-  codigo: CodigoErrorAuth;
-  intentosRestantes?: number;
-  desbloqueoEn?: number;
+  readonly codigo: CodigoErrorAuth;
+  readonly intentosRestantes?: number;
+  readonly desbloqueoEn?: number;
 
   constructor(codigo: CodigoErrorAuth, detalle?: { intentosRestantes?: number; desbloqueoEn?: number }) {
     super(codigo);

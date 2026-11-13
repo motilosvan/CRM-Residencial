@@ -137,62 +137,138 @@ describe('acceso por código', () => {
     });
   });
 
-  describe('no revela si el correo existe', () => {
-    const NO_REGISTRADOS = [
-      ['correo desconocido', DESCONOCIDO, 'cj-parques'],
-      ['correo de otro conjunto', SOPORTE, 'cj-nogal'],
-    ] as const;
+  describe('límite de intentos por pareja (conjunto, correo)', () => {
+    const MAL = '000000';
 
-    it.each(NO_REGISTRADOS)('solicitarCodigo: %s responde igual que uno registrado', async (_n, correo, conjuntoId) => {
-      const real = preparar();
-      const falso = preparar();
-      const a = await real.auth.solicitarCodigo(pedido(ADMIN));
-      const b = await falso.auth.solicitarCodigo(pedido(correo, conjuntoId));
-      expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort());
-      expect(b).toEqual(a);
-      real.avanzar(30_000);
-      falso.avanzar(30_000);
-      const ea = await error(real.auth.solicitarCodigo(pedido(ADMIN)));
-      const eb = await error(falso.auth.solicitarCodigo(pedido(correo, conjuntoId)));
-      expect(eb.codigo).toBe(ea.codigo);
-      expect(eb.codigo).toBe('REENVIO_PRONTO');
-    });
-
-    it.each(NO_REGISTRADOS)('verificarCodigo: %s cuenta intentos y bloquea igual', async (_n, correo, conjuntoId) => {
-      const real = preparar();
-      const falso = preparar();
-      await real.auth.solicitarCodigo(pedido(ADMIN));
-      await falso.auth.solicitarCodigo(pedido(correo, conjuntoId));
-      // Con el código demo: el registrado entra, el otro responde como incorrecto con 4 restantes.
-      const e0 = await error(falso.auth.verificarCodigo({ ...pedido(correo, conjuntoId), codigo: CODIGO_DEMO }));
-      expect(e0.codigo).toBe('CODIGO_INCORRECTO');
-      expect(e0.intentosRestantes).toBe(4);
-      // Mismo conteo y bloqueo que un registrado que se equivoca.
-      const resultadosReal: unknown[] = [];
-      const resultadosFalso: unknown[] = [];
-      await real.auth.verificarCodigo({ ...pedido(ADMIN), codigo: '000000' }).catch((e: ErrorAuth) => {
-        resultadosReal.push([e.codigo, e.intentosRestantes]);
-      });
-      resultadosFalso.push([e0.codigo, e0.intentosRestantes]);
-      expect(resultadosFalso).toEqual(resultadosReal);
-      let ultimo!: ErrorAuth;
-      let ultimoReal!: ErrorAuth;
-      for (let i = 0; i < 4; i++) {
-        ultimo = await error(falso.auth.verificarCodigo({ ...pedido(correo, conjuntoId), codigo: '000000' }));
-        ultimoReal = await error(real.auth.verificarCodigo({ ...pedido(ADMIN), codigo: '000000' }));
-      }
-      expect(ultimo.codigo).toBe('BLOQUEADO');
-      expect(ultimo.codigo).toBe(ultimoReal.codigo);
-      expect(ultimo.desbloqueoEn).toBe(ultimoReal.desbloqueoEn);
-      expect(ultimo.intentosRestantes).toBe(0);
-    });
-
-    it('vencimiento idéntico para correo desconocido', async () => {
+    it('pedir un código nuevo no reinicia los intentos fallidos', async () => {
       const { auth, avanzar } = preparar();
-      await auth.solicitarCodigo(pedido(DESCONOCIDO));
+      await auth.solicitarCodigo(pedido(ADMIN));
+      for (let i = 0; i < 4; i++) await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: MAL }));
+      avanzar(MIN);
+      await auth.solicitarCodigo(pedido(ADMIN));
+      const e = await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: MAL }));
+      expect(e.codigo).toBe('BLOQUEADO');
+    });
+
+    it('con 4 fallos y código nuevo, el código bueno entra y reinicia el contador', async () => {
+      const { auth, avanzar } = preparar();
+      await auth.solicitarCodigo(pedido(ADMIN));
+      for (let i = 0; i < 4; i++) await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: MAL }));
+      avanzar(MIN);
+      await auth.solicitarCodigo(pedido(ADMIN));
+      await auth.verificarCodigo({ ...pedido(ADMIN), codigo: CODIGO_DEMO });
+      avanzar(MIN);
+      await auth.solicitarCodigo(pedido(ADMIN));
+      const e = await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: MAL }));
+      expect(e.intentosRestantes).toBe(4);
+    });
+
+    it('código vencido no gasta intento', async () => {
+      const { auth, avanzar } = preparar();
+      await auth.solicitarCodigo(pedido(ADMIN));
+      await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: MAL }));
       avanzar(10 * MIN + 1);
-      const e = await error(auth.verificarCodigo({ ...pedido(DESCONOCIDO), codigo: CODIGO_DEMO }));
-      expect(e.codigo).toBe('CODIGO_VENCIDO');
+      expect((await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: MAL }))).codigo).toBe('CODIGO_VENCIDO');
+      expect((await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: MAL }))).codigo).toBe('CODIGO_VENCIDO');
+      await auth.solicitarCodigo(pedido(ADMIN));
+      const e = await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: MAL }));
+      expect(e.intentosRestantes).toBe(3);
+    });
+
+    it('verificar sin código pedido gasta intento', async () => {
+      const { auth } = preparar();
+      const e = await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: CODIGO_DEMO }));
+      expect([e.codigo, e.intentosRestantes]).toEqual(['CODIGO_INCORRECTO', 4]);
+    });
+
+    it('verificar con código ya usado gasta intento', async () => {
+      const { auth } = preparar();
+      await auth.solicitarCodigo(pedido(ADMIN));
+      await auth.verificarCodigo({ ...pedido(ADMIN), codigo: CODIGO_DEMO });
+      const e = await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo: CODIGO_DEMO }));
+      expect([e.codigo, e.intentosRestantes]).toEqual(['CODIGO_INCORRECTO', 4]);
+    });
+
+    it.each(['12345', '1234567'])('%s cuenta como incorrecto', async (codigo) => {
+      const { auth } = preparar();
+      await auth.solicitarCodigo(pedido(ADMIN));
+      const e = await error(auth.verificarCodigo({ ...pedido(ADMIN), codigo }));
+      expect([e.codigo, e.intentosRestantes]).toEqual(['CODIGO_INCORRECTO', 4]);
+    });
+
+    it('solicitarCodigo durante el bloqueo rechaza BLOQUEADO con desbloqueoEn', async () => {
+      for (const [correo, conjuntoId] of [
+        [ADMIN, 'cj-parques'],
+        [DESCONOCIDO, 'cj-parques'],
+        [SOPORTE, 'cj-nogal'],
+      ] as const) {
+        const { auth, ahora } = preparar();
+        await auth.solicitarCodigo(pedido(correo, conjuntoId));
+        for (let i = 0; i < 5; i++) await error(auth.verificarCodigo({ ...pedido(correo, conjuntoId), codigo: MAL }));
+        const e = await error(auth.solicitarCodigo(pedido(correo, conjuntoId)));
+        expect(e.codigo).toBe('BLOQUEADO');
+        expect(e.desbloqueoEn).toBe(ahora() + 15 * MIN);
+      }
+    });
+  });
+
+  describe('no revela si el correo existe: trazas idénticas', () => {
+    type Ctx = { auth: ReturnType<typeof crearAuthMock>; avanzar: (ms: number) => number; p: { conjuntoId: string; correo: string } };
+    type Paso = (c: Ctx) => Promise<unknown>;
+    const sol: Paso = (c) => c.auth.solicitarCodigo(c.p);
+    const ver = (codigo: string): Paso => (c) => c.auth.verificarCodigo({ ...c.p, codigo });
+    const esperar = (ms: number): Paso => async (c) => void c.avanzar(ms);
+
+    /** Resultado de un paso sin datos propios del usuario: código/detalle de error o forma de la respuesta. */
+    async function traza(pasos: Paso[], p: Ctx['p']) {
+      const { auth, avanzar } = preparar();
+      const salida: unknown[] = [];
+      for (const paso of pasos) {
+        try {
+          const r = await paso({ auth, avanzar, p });
+          salida.push({ ok: Object.keys(r as object).sort(), valor: r });
+        } catch (e) {
+          const err = e as ErrorAuth;
+          salida.push({ codigo: err.codigo, intentosRestantes: err.intentosRestantes, desbloqueoEn: err.desbloqueoEn });
+        }
+      }
+      return salida;
+    }
+
+    const MAL = '000000';
+    const casos: [string, Paso[]][] = [
+      ['verificar sin pedir código', [ver(MAL), ver(MAL)]],
+      ['cadena vacía', [sol, ver(' '), ver(MAL)]],
+      ['reenvío antes de 60 s y después', [sol, esperar(30_000), sol, esperar(30_000), sol]],
+      ['código vencido', [sol, ver(MAL), esperar(10 * MIN + 1), ver(MAL), ver(MAL), sol, ver(MAL)]],
+      ['5 fallos, bloqueo, solicitar bloqueado y desbloqueo', [
+        sol, ver(MAL), ver(MAL), ver(MAL), ver(MAL), ver(MAL), ver(MAL), sol,
+        esperar(15 * MIN), ver(MAL), sol, ver(MAL),
+      ]],
+      ['intentos que sobreviven al código nuevo', [sol, ver(MAL), ver(MAL), ver(MAL), ver(MAL), esperar(MIN), sol, ver(MAL)]],
+    ];
+    // El código demo solo entra con el correo registrado, así que se compara aparte (siguiente prueba).
+    const sujetos: [string, string, string][] = [
+      ['correo desconocido', DESCONOCIDO, 'cj-parques'],
+      ['correo registrado en otro conjunto', SOPORTE, 'cj-nogal'],
+    ];
+
+    it.each(casos)('%s', async (_n, pasos) => {
+      const referencia = await traza(pasos, pedido(ADMIN));
+      expect(referencia.length).toBe(pasos.length);
+      for (const [, correo, conjuntoId] of sujetos) {
+        expect(await traza(pasos, pedido(correo, conjuntoId))).toEqual(referencia);
+      }
+    });
+
+    it('el código demo con un no registrado responde como incorrecto con el mismo conteo', async () => {
+      for (const [, correo, conjuntoId] of sujetos) {
+        const t = await traza([sol, ver(CODIGO_DEMO), ver(CODIGO_DEMO)], pedido(correo, conjuntoId));
+        expect(t.slice(1)).toEqual([
+          { codigo: 'CODIGO_INCORRECTO', intentosRestantes: 4, desbloqueoEn: undefined },
+          { codigo: 'CODIGO_INCORRECTO', intentosRestantes: 3, desbloqueoEn: undefined },
+        ]);
+      }
     });
   });
 
