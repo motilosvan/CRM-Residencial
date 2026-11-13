@@ -75,12 +75,33 @@ describe('index.css coincide con derivarTema(PALETA_MAILFLOW)', () => {
   const css = readFileSync(resolve(__dirname, '../index.css'), 'utf8');
   const raiz = /:root\s*{([^}]*)}/.exec(css)?.[1] ?? '';
   const estatico = (k: string) => new RegExp(`${k}:\\s*([^;]+);`).exec(raiz)?.[1].trim();
-  const t = derivarTema(PALETA_MAILFLOW);
-  for (const k of ['--primary', '--primary-foreground', '--accent', '--accent-foreground', '--ring',
-    '--sidebar-primary', '--sidebar-primary-foreground', '--sidebar-ring'] as const) {
-    it(k, () => expect(estatico(k)).toBe(t[k]));
+  for (const [k, v] of Object.entries(derivarTema(PALETA_MAILFLOW))) {
+    it(k, () => expect(estatico(k)).toBe(v));
   }
   it('--background es el hex de marca', () => {
     expect(estatico('--background')).toBe(hexAOklch(FONDO));
+  });
+  it('@theme inline mapea primary-hover y primary-claro', () => {
+    expect(css).toMatch(/--color-primary-hover:\s*var\(--primary-hover\)/);
+    expect(css).toMatch(/--color-primary-claro:\s*var\(--primary-claro\)/);
+  });
+});
+
+describe('validación ampliada', () => {
+  it('deriva --sidebar-accent-foreground', () => {
+    expect(derivarTema(PALETA_MAILFLOW)['--sidebar-accent-foreground']).toMatch(/^oklch\(/);
+  });
+  it('primario en el límite: pasa sobre fondo pero falla sobre el claro', () => {
+    // Busca un gris que pase sobre FONDO y falle sobre su claro (tinte L 0.95).
+    let hallado: string | null = null;
+    for (let v = 0x60; v <= 0x90 && !hallado; v++) {
+      const hex = '#' + v.toString(16).padStart(2, '0').repeat(3);
+      const r = validarPaleta({ primario: hex, acento: '#E0A458' });
+      if (!r.problemas.some((p) => /fondo/.test(p.par)) && r.problemas.some((p) => /claro/.test(p.par))) hallado = hex;
+    }
+    expect(hallado).not.toBeNull();
+    const r = validarPaleta({ primario: hallado!, acento: '#E0A458' });
+    expect(r.valida).toBe(false);
+    expect(r.problemas.some((p) => /primario\/claro/.test(p.par))).toBe(true);
   });
 });

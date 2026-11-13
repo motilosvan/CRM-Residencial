@@ -60,16 +60,28 @@ function tinte(base: Oklch, l: number, factorC: number): Oklch {
   return { mode: 'oklch', l, c: base.c * factorC, h: base.h };
 }
 
+/** Tinte muy claro del primario: fondo de `--primary-claro`, `--sidebar-accent` y `--secondary` por defecto. */
+function tinteClaro(primario: Oklch): Oklch {
+  return tinte(primario, 0.95, 0.25);
+}
+
 /** Pares (nombre, fondo, foreground) cuyo contraste debe ser AA. */
 function pares(c: Colores): Array<[string, Oklch, Oklch]> {
   const fondo = aOklch(parse(FONDO)!);
-  const secundario = c.secundario ?? tinte(c.primario, 0.95, 0.25);
-  return [
+  const secundario = c.secundario ?? tinteClaro(c.primario);
+  const claro = tinteClaro(c.primario);
+  const lista: Array<[string, Oklch, Oklch]> = [
     ['primario/fondo', fondo, c.primario],
+    ['primario/claro', claro, c.primario],
+    ['sidebar-accent-foreground/sidebar-accent', claro, foregroundDe(claro)],
     ['primary-foreground/primario', c.primario, foregroundDe(c.primario)],
     ['accent-foreground/acento', c.acento, foregroundDe(c.acento)],
     ['secondary-foreground/secundario', secundario, foregroundDe(secundario)],
   ];
+  // Un secundario explícito es un relleno de marca con su propio foreground; el primario solo
+  // se pinta sobre `--secondary` cuando este es el tinte claro derivado.
+  if (!c.secundario) lista.push(['primario/secondary', secundario, c.primario]);
+  return lista;
 }
 
 export function validarPaleta(p: Paleta): { valida: boolean; problemas: ProblemaContraste[] } {
@@ -86,8 +98,8 @@ export function validarPaleta(p: Paleta): { valida: boolean; problemas: Problema
 /** Variables CSS de shadcn en OKLCH. Con una paleta inválida deriva la de MailFlow. */
 export function derivarTema(p: Paleta): VariablesTema {
   const c = leer(p) ?? leer(PALETA_MAILFLOW)!;
-  const secundario = c.secundario ?? tinte(c.primario, 0.95, 0.25);
-  const claro = tinte(c.primario, 0.95, 0.25);
+  const claro = tinteClaro(c.primario);
+  const secundario = c.secundario ?? claro;
   const ring = tinte(c.primario, 0.55, 1.4);
   return {
     '--primary': texto(c.primario),
@@ -102,6 +114,7 @@ export function derivarTema(p: Paleta): VariablesTema {
     '--sidebar-primary': texto(c.primario),
     '--sidebar-primary-foreground': texto(foregroundDe(c.primario)),
     '--sidebar-accent': texto(claro),
+    '--sidebar-accent-foreground': texto(foregroundDe(claro)),
     '--sidebar-ring': texto(ring),
   };
 }

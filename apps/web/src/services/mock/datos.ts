@@ -10,7 +10,7 @@ export const CONJUNTOS_DEMO: Conjunto[] = [
     id: 'cj-miradores',
     slug: 'miradores-del-rio',
     nombre: 'Miradores del Río',
-    paleta: { primario: '#1F4E79', acento: '#C8742B', secundario: '#4F7CAC' },
+    paleta: { primario: '#1F4E79', acento: '#C8742B', secundario: '#5584B5' },
   },
 ];
 

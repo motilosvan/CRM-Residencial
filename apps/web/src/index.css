@@ -11,8 +11,8 @@
   --popover-foreground: oklch(0.2 0.025 255);
   --primary: oklch(0.3462 0.0736 256.04);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.008 90);
-  --secondary-foreground: oklch(0.27 0.03 255);
+  --secondary: oklch(0.95 0.0184 256.04);
+  --secondary-foreground: oklch(0.2 0.025 255);
   --muted: oklch(0.95 0.008 90);
   --muted-foreground: oklch(0.45 0.02 255);
   --accent: oklch(0.7607 0.1171 70.94);
@@ -30,10 +30,12 @@
   --sidebar-foreground: oklch(0.2 0.025 255);
   --sidebar-primary: oklch(0.3462 0.0736 256.04);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.92 0.015 85);
-  --sidebar-accent-foreground: oklch(0.22 0.04 255);
+  --sidebar-accent: oklch(0.95 0.0184 256.04);
+  --sidebar-accent-foreground: oklch(0.2 0.025 255);
   --sidebar-border: oklch(0.89 0.01 90);
   --sidebar-ring: oklch(0.55 0.103 256.04);
+  --primary-hover: oklch(0.2862 0.0736 256.04);
+  --primary-claro: oklch(0.95 0.0184 256.04);
 }
 
 @theme inline {
@@ -51,6 +53,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-claro: var(--primary-claro);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
