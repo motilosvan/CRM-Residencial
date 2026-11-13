@@ -7,6 +7,7 @@ import { TOPE_ESCRITURA_MS, useInactividad } from './useInactividad';
 
 const AHORA = new Date('2026-01-10T12:00:00Z').getTime();
 const MIN = 60_000;
+const TIPOS = ['keydown', 'pointerdown', 'pointermove', 'scroll', 'visibilitychange', 'storage'];
 
 function crearSesion(): Sesion {
   const a = { id: 'c1', slug: 'alamos', nombre: 'Álamos' };
@@ -49,6 +50,7 @@ describe('useInactividad', () => {
     useSesion.getState().iniciar(crearSesion());
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     localStorage.clear();
     useSesion.setState({ sesion: null, motivoCierre: null });
@@ -121,6 +123,18 @@ describe('useInactividad', () => {
     expect(useSesion.getState().sesion).not.toBeNull();
   });
 
+  it('el cierre por inactividad en otra pestaña conserva el motivo aquí y en localStorage', () => {
+    renderHook(() => useInactividad());
+    const valor = JSON.stringify({ state: { sesion: null, motivoCierre: 'inactividad' }, version: 0 });
+    localStorage.setItem('mailflow.sesion', valor);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'mailflow.sesion', newValue: valor }));
+    });
+    expect(useSesion.getState().sesion).toBeNull();
+    expect(useSesion.getState().motivoCierre).toBe('inactividad');
+    expect(JSON.parse(localStorage.getItem('mailflow.sesion')!).state.motivoCierre).toBe('inactividad');
+  });
+
   it('el cierre en otra pestaña cierra también esta', () => {
     renderHook(() => useInactividad());
     escribirDesdeOtraPestana(null);
@@ -136,22 +150,45 @@ describe('useInactividad', () => {
     expect(useSesion.getState().motivoCierre).toBe('inactividad');
   });
 
-  it('sin sesión no hace nada y limpia listeners al desmontar', () => {
+  it('sin sesión no hace nada: ni intervalo ni listeners', () => {
     useSesion.setState({ sesion: null, motivoCierre: null });
-    const quitar = vi.spyOn(window, 'removeEventListener');
+    const agregarV = vi.spyOn(window, 'addEventListener');
+    const agregarD = vi.spyOn(document, 'addEventListener');
     const { result, unmount } = renderHook(() => useInactividad());
     avanzar(40 * MIN);
     expect(result.current.avisoVisible).toBe(false);
     expect(useSesion.getState().motivoCierre).toBeNull();
-    unmount();
+    expect(agregarV.mock.calls.filter(([t]) => TIPOS.includes(t))).toHaveLength(0);
+    expect(agregarD.mock.calls.filter(([t]) => TIPOS.includes(t))).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(0);
-    quitar.mockRestore();
+    unmount();
   });
 
-  it('al desmontar con sesión quita el intervalo y los listeners', () => {
+  it('al desmontar con sesión retira el intervalo y cada listener con el mismo tipo y función', () => {
+    const agregarV = vi.spyOn(window, 'addEventListener');
+    const quitarV = vi.spyOn(window, 'removeEventListener');
+    const agregarD = vi.spyOn(document, 'addEventListener');
+    const quitarD = vi.spyOn(document, 'removeEventListener');
     const { unmount } = renderHook(() => useInactividad());
     expect(vi.getTimerCount()).toBe(1);
+    const propios = (calls: unknown[][]) => calls.filter(([t]) => TIPOS.includes(t as string));
+    const regV = propios(agregarV.mock.calls);
+    const regD = propios(agregarD.mock.calls);
+    expect(regV.map(([t]) => t).sort()).toEqual(
+      ['keydown', 'pointerdown', 'pointermove', 'scroll', 'storage'].sort(),
+    );
+    expect(regD.map(([t]) => t)).toEqual(['visibilitychange']);
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+    for (const [t, f] of regV) expect(quitarV).toHaveBeenCalledWith(t, f);
+    for (const [t, f] of regD) expect(quitarD).toHaveBeenCalledWith(t, f);
+
+    // Tras desmontar, los eventos y el reloj ya no tocan el store.
+    const antes = useSesion.getState().sesion;
+    disparar('pointermove');
+    disparar('visibilitychange', document);
+    avanzar(LIMITE_INACTIVIDAD_MS);
+    expect(useSesion.getState().sesion).toEqual(antes);
+    expect(useSesion.getState().motivoCierre).toBeNull();
   });
 });

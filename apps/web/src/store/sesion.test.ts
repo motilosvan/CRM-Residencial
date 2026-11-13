@@ -141,6 +141,36 @@ describe('useSesion', () => {
       expect(useSesion.getState().sesion).toBeNull();
     });
 
+    it('sin sesión conserva el motivo de cierre persistido', async () => {
+      guardar({ sesion: null, motivoCierre: 'inactividad' });
+      await useSesion.persist.rehydrate();
+      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().motivoCierre).toBe('inactividad');
+      expect(JSON.parse(localStorage.getItem('mailflow.sesion')!).state.motivoCierre).toBe('inactividad');
+    });
+
+    it('sesión corrupta: sin sesión y sin motivo', async () => {
+      guardar({ sesion: { basura: true }, motivoCierre: 'manual' });
+      await useSesion.persist.rehydrate();
+      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().motivoCierre).toBeNull();
+    });
+
+    it.each([
+      ['conjuntos con null', (s: Sesion) => ({ ...s, conjuntos: [null] })],
+      ['usuario vacío', (s: Sesion) => ({ ...s, usuario: {} })],
+      ['rol inválido', (s: Sesion) => ({ ...s, usuario: { ...s.usuario, rol: 'DIOS' } })],
+      [
+        'conjuntoActivo fuera de conjuntos',
+        (s: Sesion) => ({ ...s, conjuntoActivo: { id: 'x', slug: 'ajeno', nombre: 'Ajeno' } }),
+      ],
+      ['conjuntoActivo sin slug', (s: Sesion) => ({ ...s, conjuntoActivo: { id: 'x', nombre: 'A' } })],
+    ])('forma inesperada (%s): sin sesión y sin lanzar', async (_n, deforma) => {
+      guardar({ sesion: deforma(crearSesion()), motivoCierre: null });
+      await expect(useSesion.persist.rehydrate()).resolves.not.toThrow();
+      expect(useSesion.getState().sesion).toBeNull();
+    });
+
     it('ultimaActividad no numérica: sin sesión', async () => {
       guardar({ sesion: { ...crearSesion(), ultimaActividad: 'ayer' }, motivoCierre: null });
       await useSesion.persist.rehydrate();
