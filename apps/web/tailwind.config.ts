@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss';
+import animate from 'tailwindcss-animate';
 
 export default {
   darkMode: 'class',
@@ -10,6 +11,7 @@ export default {
           DEFAULT: '#355E3B',
           hover: '#284A2E',
           light: '#E8EDE5',
+          foreground: '#FFFFFF',
         },
         secondary: {
           DEFAULT: '#789653',
@@ -18,6 +20,7 @@ export default {
         accent: {
           DEFAULT: '#D6A64F',
           hover: '#C2923A',
+          foreground: '#292D29',
         },
         background: '#F7F6F0',
         surface: '#F7F6F0',
@@ -51,6 +54,15 @@ export default {
           900: '#284A2E',
           950: '#1F3524',
         },
+        // Tokens de shadcn/ui, enlazados a la paleta de index.css (cambian solos en modo oscuro)
+        border: 'var(--color-border)',
+        input: 'var(--color-border)',
+        ring: 'var(--color-primary)',
+        foreground: 'var(--color-text)',
+        card: { DEFAULT: 'var(--color-surface)', foreground: 'var(--color-text)' },
+        popover: { DEFAULT: 'var(--color-surface)', foreground: 'var(--color-text)' },
+        muted: { DEFAULT: 'var(--color-secondary-light)', foreground: 'var(--color-text-muted)' },
+        destructive: { DEFAULT: '#D64545', foreground: '#FFFFFF' },
         priority: {
           alta: '#D64545',
           media: '#E8A317',
@@ -73,5 +85,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 } satisfies Config;
