@@ -212,62 +212,103 @@ describe('acceso por código', () => {
     });
   });
 
-  describe('no revela si el correo existe: trazas idénticas', () => {
-    type Ctx = { auth: ReturnType<typeof crearAuthMock>; avanzar: (ms: number) => number; p: { conjuntoId: string; correo: string } };
-    type Paso = (c: Ctx) => Promise<unknown>;
-    const sol: Paso = (c) => c.auth.solicitarCodigo(c.p);
-    const ver = (codigo: string): Paso => (c) => c.auth.verificarCodigo({ ...c.p, codigo });
-    const esperar = (ms: number): Paso => async (c) => void c.avanzar(ms);
+  describe('no revela si el correo existe: trazas idénticas y con valores esperados', () => {
+    type Auth = ReturnType<typeof crearAuthMock>;
+    type Pedido = { conjuntoId: string; correo: string };
+    type Paso = { espera: number } | { llama: (auth: Auth, p: Pedido) => Promise<unknown> };
+    /** Resultado esperado: tiempos relativos al inicio de la secuencia. */
+    type Esperado =
+      | 'espera'
+      | { ok: { venceEn: number; reenvioDisponibleEn: number } }
+      | { codigo: string; intentosRestantes?: number; desbloqueoEn?: number };
 
-    /** Resultado de un paso sin datos propios del usuario: código/detalle de error o forma de la respuesta. */
-    async function traza(pasos: Paso[], p: Ctx['p']) {
-      const { auth, avanzar } = preparar();
-      const salida: unknown[] = [];
+    const sol: Paso = { llama: (a, p) => a.solicitarCodigo(p) };
+    const ver = (codigo: string): Paso => ({ llama: (a, p) => a.verificarCodigo({ ...p, codigo }) });
+    const esperar = (ms: number): Paso => ({ espera: ms });
+
+    const OK = (venceEn: number, reenvioDisponibleEn: number): Esperado => ({ ok: { venceEn, reenvioDisponibleEn } });
+    const INC = (intentosRestantes: number): Esperado => ({ codigo: 'CODIGO_INCORRECTO', intentosRestantes });
+    const BLOQ = (desbloqueoEn: number): Esperado => ({ codigo: 'BLOQUEADO', intentosRestantes: 0, desbloqueoEn });
+    const VENCIDO: Esperado = { codigo: 'CODIGO_VENCIDO' };
+    const PRONTO: Esperado = { codigo: 'REENVIO_PRONTO' };
+
+    /** Ejecuta los pasos y devuelve lo observado. Solo captura `ErrorAuth`; cualquier otro error falla la prueba. */
+    async function traza(pasos: Paso[], p: Pedido): Promise<Esperado[]> {
+      const { auth, avanzar, ahora } = preparar();
+      const t0 = ahora();
+      const salida: Esperado[] = [];
       for (const paso of pasos) {
+        if ('espera' in paso) {
+          avanzar(paso.espera);
+          salida.push('espera');
+          continue;
+        }
         try {
-          const r = await paso({ auth, avanzar, p });
-          salida.push({ ok: Object.keys(r as object).sort(), valor: r });
+          const r = (await paso.llama(auth, p)) as { venceEn: number; reenvioDisponibleEn: number };
+          expect(Object.keys(r).sort()).toEqual(['reenvioDisponibleEn', 'venceEn']);
+          salida.push(OK(r.venceEn - t0, r.reenvioDisponibleEn - t0));
         } catch (e) {
-          const err = e as ErrorAuth;
-          salida.push({ codigo: err.codigo, intentosRestantes: err.intentosRestantes, desbloqueoEn: err.desbloqueoEn });
+          if (!(e instanceof ErrorAuth)) throw e;
+          const obs: { codigo: string; intentosRestantes?: number; desbloqueoEn?: number } = { codigo: e.codigo };
+          if (e.intentosRestantes !== undefined) obs.intentosRestantes = e.intentosRestantes;
+          if (e.desbloqueoEn !== undefined) obs.desbloqueoEn = e.desbloqueoEn - t0;
+          salida.push(obs);
         }
       }
       return salida;
     }
 
     const MAL = '000000';
-    const casos: [string, Paso[]][] = [
-      ['verificar sin pedir código', [ver(MAL), ver(MAL)]],
-      ['cadena vacía', [sol, ver(' '), ver(MAL)]],
-      ['reenvío antes de 60 s y después', [sol, esperar(30_000), sol, esperar(30_000), sol]],
-      ['código vencido', [sol, ver(MAL), esperar(10 * MIN + 1), ver(MAL), ver(MAL), sol, ver(MAL)]],
-      ['5 fallos, bloqueo, solicitar bloqueado y desbloqueo', [
-        sol, ver(MAL), ver(MAL), ver(MAL), ver(MAL), ver(MAL), ver(MAL), sol,
-        esperar(15 * MIN), ver(MAL), sol, ver(MAL),
-      ]],
-      ['intentos que sobreviven al código nuevo', [sol, ver(MAL), ver(MAL), ver(MAL), ver(MAL), esperar(MIN), sol, ver(MAL)]],
+    const s = 1000;
+    const casos: [string, Paso[], Esperado[]][] = [
+      ['verificar sin pedir código', [ver(MAL), ver(MAL)], [INC(4), INC(3)]],
+      [
+        "cadena vacía ('' y ' ') no gasta intento",
+        [sol, ver(''), ver(' '), ver(MAL)],
+        [OK(10 * MIN, MIN), INC(5), INC(5), INC(4)],
+      ],
+      [
+        'reenvío antes de 60 s y después',
+        [sol, esperar(30 * s), sol, esperar(30 * s), sol],
+        [OK(10 * MIN, MIN), 'espera', PRONTO, 'espera', OK(MIN + 10 * MIN, 2 * MIN)],
+      ],
+      [
+        'código vencido',
+        [sol, ver(MAL), esperar(10 * MIN + 1), ver(MAL), ver(MAL), sol, ver(MAL)],
+        [OK(10 * MIN, MIN), INC(4), 'espera', VENCIDO, VENCIDO, OK(20 * MIN + 1, 11 * MIN + 1), INC(3)],
+      ],
+      [
+        '5 fallos, bloqueo, solicitar bloqueado y desbloqueo',
+        [sol, ver(MAL), ver(MAL), ver(MAL), ver(MAL), ver(MAL), ver(MAL), sol, esperar(15 * MIN), ver(MAL), sol, ver(MAL)],
+        [
+          OK(10 * MIN, MIN), INC(4), INC(3), INC(2), INC(1), BLOQ(15 * MIN), BLOQ(15 * MIN), BLOQ(15 * MIN),
+          'espera', INC(4), OK(25 * MIN, 16 * MIN), INC(3),
+        ],
+      ],
+      [
+        'intentos que sobreviven al código nuevo',
+        [sol, ver(MAL), ver(MAL), ver(MAL), ver(MAL), esperar(MIN), sol, ver(MAL)],
+        [OK(10 * MIN, MIN), INC(4), INC(3), INC(2), INC(1), 'espera', OK(11 * MIN, 2 * MIN), BLOQ(16 * MIN)],
+      ],
     ];
     // El código demo solo entra con el correo registrado, así que se compara aparte (siguiente prueba).
-    const sujetos: [string, string, string][] = [
+    const identidades: [string, string, string][] = [
+      ['registrado', ADMIN, 'cj-parques'],
       ['correo desconocido', DESCONOCIDO, 'cj-parques'],
       ['correo registrado en otro conjunto', SOPORTE, 'cj-nogal'],
     ];
 
-    it.each(casos)('%s', async (_n, pasos) => {
-      const referencia = await traza(pasos, pedido(ADMIN));
-      expect(referencia.length).toBe(pasos.length);
-      for (const [, correo, conjuntoId] of sujetos) {
-        expect(await traza(pasos, pedido(correo, conjuntoId))).toEqual(referencia);
-      }
+    describe.each(casos)('%s', (_n, pasos, esperado) => {
+      it.each(identidades)('%s', async (_i, correo, conjuntoId) => {
+        expect(esperado).toHaveLength(pasos.length);
+        expect(await traza(pasos, pedido(correo, conjuntoId))).toEqual(esperado);
+      });
     });
 
     it('el código demo con un no registrado responde como incorrecto con el mismo conteo', async () => {
-      for (const [, correo, conjuntoId] of sujetos) {
+      for (const [, correo, conjuntoId] of identidades.slice(1)) {
         const t = await traza([sol, ver(CODIGO_DEMO), ver(CODIGO_DEMO)], pedido(correo, conjuntoId));
-        expect(t.slice(1)).toEqual([
-          { codigo: 'CODIGO_INCORRECTO', intentosRestantes: 4, desbloqueoEn: undefined },
-          { codigo: 'CODIGO_INCORRECTO', intentosRestantes: 3, desbloqueoEn: undefined },
-        ]);
+        expect(t).toEqual([OK(10 * MIN, MIN), INC(4), INC(3)]);
       }
     });
   });
