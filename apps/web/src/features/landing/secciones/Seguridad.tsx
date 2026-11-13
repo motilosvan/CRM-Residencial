@@ -26,7 +26,12 @@ export function Seguridad() {
             información.
           </p>
           <div className="mt-8">
-            <Button asChild variant="secondary" size="lg">
+            <Button
+              asChild
+              variant="secondary"
+              size="lg"
+              className="focus-visible:border-primary-foreground focus-visible:outline-primary-foreground focus-visible:ring-primary-foreground"
+            >
               <Link to="/login">Iniciar sesión</Link>
             </Button>
           </div>

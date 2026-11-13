@@ -50,4 +50,12 @@ describe('LandingPage', () => {
     const seguridad = screen.getByRole('region', { name: /seguridad/i });
     expect(within(seguridad).getByText(/ley 1581/i)).toBeInTheDocument();
   });
+
+  it('el acceso de la banda azul usa un foco claro visible sobre bg-primary', () => {
+    montar();
+    const seguridad = screen.getByRole('region', { name: /seguridad/i });
+    const acceso = within(seguridad).getByRole('link', { name: /iniciar sesión/i });
+    expect(acceso.className).toContain('focus-visible:ring-primary-foreground');
+    expect(acceso.className).toContain('focus-visible:outline-primary-foreground');
+  });
 });

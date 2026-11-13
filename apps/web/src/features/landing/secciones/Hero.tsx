@@ -88,7 +88,7 @@ export function Hero() {
             </span>
             <span className="h-3 w-0.5 rounded-full bg-accent" />
           </div>
-          <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 motion-safe:delay-500 motion-safe:duration-700 motion-safe:fill-mode-both lg:translate-x-6">
+          <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 motion-safe:delay-500 motion-safe:duration-700 motion-safe:fill-mode-both xl:translate-x-6">
             <SolicitudCreada />
           </div>
         </div>

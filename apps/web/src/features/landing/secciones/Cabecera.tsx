@@ -6,7 +6,7 @@ export function Cabecera() {
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        <Link to="/" aria-label="MailFlow, inicio" className="rounded-md">
+        <Link to="/" aria-label="MailFlow, inicio" className="rounded-md focus-visible:outline-offset-4">
           <Logo />
         </Link>
         <Button asChild size="sm">
