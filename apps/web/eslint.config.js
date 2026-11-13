@@ -8,8 +8,12 @@ export default tseslint.config(
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended, reactHooks.configs.flat.recommended],
-    languageOptions: { ecmaVersion: 2023, globals: { ...globals.browser, ...globals.node } },
+    languageOptions: { ecmaVersion: 2023, globals: globals.browser },
     rules: { '@typescript-eslint/no-explicit-any': 'error' },
+  },
+  {
+    files: ['*.config.{js,ts}'],
+    languageOptions: { globals: globals.node },
   },
   {
     // Código generado por shadcn: se deja como viene.
