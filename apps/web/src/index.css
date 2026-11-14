@@ -103,3 +103,110 @@
     }
   }
 }
+
+/* ---------- Landing: movimiento y presencia de marca (solo se añade) ---------- */
+@layer utilities {
+  /* Fachada de torre: retícula fina que se desvanece hacia abajo y a los lados. */
+  .mf-reticula {
+    background-image:
+      linear-gradient(to right, color-mix(in oklch, var(--primary-foreground) 9%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in oklch, var(--primary-foreground) 9%, transparent) 1px, transparent 1px);
+    background-size: 72px 72px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 70% at 60% 30%, black 20%, transparent 75%);
+    mask-image: radial-gradient(ellipse 80% 70% at 60% 30%, black 20%, transparent 75%);
+  }
+  .mf-resplandor-a {
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--ring) 55%, transparent), transparent);
+  }
+  .mf-resplandor-b {
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--accent) 24%, transparent), transparent);
+  }
+  .mf-foco {
+    background: radial-gradient(
+      280px circle at var(--x, 50%) var(--y, 50%),
+      color-mix(in oklch, var(--accent) 24%, transparent),
+      transparent 70%
+    );
+  }
+  .mf-trazo-svg {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .mf-entra {
+      animation: mf-entra 1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+      animation-delay: var(--d, 0ms);
+    }
+    .mf-aparece {
+      animation: mf-aparece 0.9s ease-out both;
+      animation-delay: var(--d, 0ms);
+    }
+    .mf-trazo-svg {
+      stroke-dashoffset: 1;
+      animation: mf-trazo 1s cubic-bezier(0.5, 0, 0.2, 1) both;
+      animation-delay: var(--d, 0ms);
+    }
+    .mf-deriva-a {
+      animation: mf-deriva-a 26s ease-in-out infinite alternate;
+    }
+    .mf-deriva-b {
+      animation: mf-deriva-b 32s ease-in-out infinite alternate;
+    }
+    .mf-escaneo {
+      animation: mf-escaneo 1.5s ease-in-out both;
+    }
+    .mf-cinta {
+      -webkit-mask-image: linear-gradient(to right, transparent, black 7%, black 93%, transparent);
+      mask-image: linear-gradient(to right, transparent, black 7%, black 93%, transparent);
+    }
+    .mf-cinta-pista {
+      width: max-content;
+      animation: mf-cinta 48s linear infinite;
+    }
+    .mf-cinta:hover .mf-cinta-pista,
+    .mf-cinta:focus-within .mf-cinta-pista,
+    .mf-cinta:focus .mf-cinta-pista {
+      animation-play-state: paused;
+    }
+    /* Trazos que se dibujan cuando su contenedor entra en vista (data-revelado="true"). */
+    [data-trazo] .mf-trazo-vista {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+      transition: stroke-dashoffset 0.9s cubic-bezier(0.5, 0, 0.2, 1);
+      transition-delay: var(--d, 0ms);
+    }
+    [data-trazo][data-revelado='true'] .mf-trazo-vista {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  @keyframes mf-entra {
+    from { opacity: 0; transform: translateY(110%); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes mf-aparece {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes mf-trazo {
+    to { stroke-dashoffset: 0; }
+  }
+  @keyframes mf-deriva-a {
+    from { transform: translate3d(-6%, -4%, 0) scale(1); }
+    to { transform: translate3d(8%, 6%, 0) scale(1.15); }
+  }
+  @keyframes mf-deriva-b {
+    from { transform: translate3d(6%, 4%, 0) scale(1.1); }
+    to { transform: translate3d(-8%, -6%, 0) scale(0.95); }
+  }
+  @keyframes mf-escaneo {
+    0% { transform: translateY(-100%); opacity: 0; }
+    15%, 85% { opacity: 1; }
+    100% { transform: translateY(100%); opacity: 0; }
+  }
+  @keyframes mf-cinta {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+}

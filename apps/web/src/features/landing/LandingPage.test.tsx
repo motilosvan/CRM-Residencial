@@ -59,3 +59,18 @@ describe('LandingPage', () => {
     expect(acceso.className).toContain('focus-visible:outline-primary-foreground');
   });
 });
+
+describe('Franja de garantías', () => {
+  it('contiene los cuatro textos exactos', () => {
+    montar();
+    const franja = screen.getByRole('region', { name: /garantías/i });
+    for (const t of [
+      'Código de un solo uso',
+      'Sesión que se cierra sola a los 30 min',
+      'Tratamiento según Ley 1581',
+      'La IA solo sugiere',
+    ]) {
+      expect(within(franja).getAllByText(t).length).toBeGreaterThan(0);
+    }
+  });
+});

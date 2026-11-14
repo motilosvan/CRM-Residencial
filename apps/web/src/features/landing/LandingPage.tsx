@@ -1,6 +1,8 @@
 import { Beneficios } from './secciones/Beneficios';
+import { Cierre } from './secciones/Cierre';
 import { Cabecera } from './secciones/Cabecera';
 import { ComoFunciona } from './secciones/ComoFunciona';
+import { Garantias } from './secciones/Garantias';
 import { Hero } from './secciones/Hero';
 import { Pie } from './secciones/Pie';
 import { Seguridad } from './secciones/Seguridad';
@@ -17,9 +19,11 @@ export default function LandingPage() {
       <Cabecera />
       <main id="contenido" tabIndex={-1} className="outline-none">
         <Hero />
+        <Garantias />
         <ComoFunciona />
         <Beneficios />
         <Seguridad />
+        <Cierre />
       </main>
       <Pie />
     </div>
