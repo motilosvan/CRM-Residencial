@@ -70,7 +70,10 @@ describe('Franja de garantías', () => {
       'Tratamiento según Ley 1581',
       'La IA solo sugiere',
     ]) {
-      expect(within(franja).getAllByText(t).length).toBeGreaterThan(0);
+      const accesibles = within(franja)
+        .getAllByText(t)
+        .filter((el) => !el.closest('[aria-hidden="true"]'));
+      expect(accesibles).toHaveLength(1);
     }
   });
 });

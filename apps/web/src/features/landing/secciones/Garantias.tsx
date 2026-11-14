@@ -14,12 +14,12 @@ function Lista({ copia = false }: { copia?: boolean }) {
     <ul
       aria-hidden={copia ? true : undefined}
       className={cn(
-        'flex shrink-0 items-center gap-14 pr-14 motion-reduce:flex-wrap motion-reduce:justify-center motion-reduce:gap-x-10 motion-reduce:gap-y-4 motion-reduce:pr-0',
+        'flex shrink-0 items-center gap-14 pr-14 motion-reduce:w-full motion-reduce:shrink motion-reduce:flex-wrap motion-reduce:justify-center motion-reduce:gap-x-10 motion-reduce:gap-y-4 motion-reduce:pr-0',
         copia && 'motion-reduce:hidden',
       )}
     >
       {GARANTIAS.map(({ texto, icono: Icono }) => (
-        <li key={texto} className="flex items-center gap-3 whitespace-nowrap text-sm font-medium text-foreground">
+        <li key={texto} className="flex items-center gap-3 whitespace-nowrap text-sm motion-reduce:whitespace-normal font-medium text-foreground">
           <Icono className="size-4 text-primary" aria-hidden={true} />
           {texto}
         </li>
@@ -36,7 +36,7 @@ export function Garantias() {
       tabIndex={0}
       className="mf-cinta overflow-hidden border-b border-border bg-background py-6 outline-offset-[-3px]"
     >
-      <div className="mf-cinta-pista flex">
+      <div className="mf-cinta-pista flex motion-reduce:w-full">
         <Lista />
         <Lista copia />
       </div>

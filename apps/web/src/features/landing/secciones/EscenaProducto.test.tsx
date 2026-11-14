@@ -7,6 +7,19 @@ function fase(contenedor: HTMLElement): number {
   return Number(nodo?.getAttribute('data-fase'));
 }
 
+class ObservadorFalso {
+  static instancias: ObservadorFalso[] = [];
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  constructor(public callback: IntersectionObserverCallback) {
+    ObservadorFalso.instancias.push(this);
+  }
+  intersectar(visible: boolean) {
+    this.callback([{ isIntersecting: visible } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+  }
+}
+
 describe('EscenaProducto', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -51,5 +64,61 @@ describe('EscenaProducto', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false }));
     const { container } = render(<EscenaProducto />);
     expect(container.firstElementChild).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('no avanza fuera de pantalla y reanuda al volver a verse', () => {
+    ObservadorFalso.instancias = [];
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    vi.stubGlobal('IntersectionObserver', ObservadorFalso);
+    const { container } = render(<EscenaProducto />);
+    const observador = ObservadorFalso.instancias[0];
+    // Aún no se ha visto: no hay temporizadores ni avance.
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+    expect(fase(container)).toBe(0);
+    act(() => observador.intersectar(true));
+    act(() => {
+      vi.advanceTimersByTime(DURACIONES_FASES[0]);
+    });
+    expect(fase(container)).toBe(1);
+    act(() => observador.intersectar(false));
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(20000);
+    });
+    expect(fase(container)).toBe(1);
+    act(() => observador.intersectar(true));
+    act(() => {
+      vi.advanceTimersByTime(DURACIONES_FASES[1]);
+    });
+    expect(fase(container)).toBe(2);
+  });
+
+  it('se pausa con la pestaña oculta y reanuda al mostrarse', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    const { container } = render(<EscenaProducto />);
+    const ocultar = (oculta: boolean) => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => oculta });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    };
+    try {
+      ocultar(true);
+      expect(vi.getTimerCount()).toBe(0);
+      act(() => {
+        vi.advanceTimersByTime(20000);
+      });
+      expect(fase(container)).toBe(0);
+      ocultar(false);
+      act(() => {
+        vi.advanceTimersByTime(DURACIONES_FASES[0]);
+      });
+      expect(fase(container)).toBe(1);
+    } finally {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    }
   });
 });
