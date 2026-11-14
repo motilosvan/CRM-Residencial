@@ -57,3 +57,19 @@ Arquitectura en **tres capas** (presentación, lógica de negocio, datos) más u
 ## 5. Garantías y dónde viven
 
 Ver la sección 5 de [`estudio-funcionalidad-y-bd-transaccional.md`](estudio-funcionalidad-y-bd-transaccional.md).
+
+## 6. Frontend MailFlow
+
+El panel `apps/web` se rehace como MailFlow (multi-conjunto, solo personal). Spec: [`mailflow-entrevista.md`](mailflow-entrevista.md); plan de F1: [`plan-mailflow-f1.md`](plan-mailflow-f1.md). Decisiones de implementación (React Router en modo datos, `tsconfig` único, `culori`, sesión en `localStorage`) están en la sección «Decisiones mías» de ese plan.
+
+- Servicios definidos como interfaces (contrato futuro del backend) con implementación simulada en `apps/web/src/services/mock`. No hay backend por conjunto todavía.
+- Tema por conjunto: sobrescribe las variables CSS de shadcn en `<html>`; si la paleta del conjunto no cumple AA, se usa la de MailFlow.
+- Solo modo claro. Esto elimina el modo oscuro de la entrevista (decisión 16) y no reescribe ningún ADR de esta tabla.
+- El panel anterior vive en `apps/web-legacy` como referencia hasta F4.
+
+Objeciones abiertas (no bloquean F1; se argumentan antes de F2):
+
+1. **Buzón real sin noción de conjunto:** `/api/correos` no filtra por conjunto; todos los conjuntos verían el mismo buzón.
+2. **Cambio de conjunto sin código nuevo:** aceptable en mock; con backend real la pertenencia debe validarse en el servidor en cada cambio.
+3. **Sesión en `localStorage`:** choca con la cookie `httpOnly` del ADR 9; debe migrar cuando exista login real.
+4. **ADR 9 vigente:** el panel hoy corre detrás del proxy de Vite, no lo sirve la API. Pendiente de decidir; esta entrada no lo reescribe.

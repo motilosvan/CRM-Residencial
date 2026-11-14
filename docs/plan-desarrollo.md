@@ -2,6 +2,8 @@
 
 Backlog ejecutable por agentes. Cada tarea tiene ID, alcance, agente responsable y **criterio de aceptación verificable**. Una tarea está terminada cuando `npm run gate` pasa y `@reviewer` aprueba el diff.
 
+> **Nota sobre el panel (2026-11-14):** el panel cambia de alcance. El nuevo panel MailFlow (`apps/web`) se rige por [`docs/plan-mailflow-f1.md`](plan-mailflow-f1.md) y la entrevista [`docs/mailflow-entrevista.md`](mailflow-entrevista.md); la fase F1 (landing, login, layout y tema por conjunto) está hecha con servicios simulados. Las semanas 4 y 5 de este plan, en lo que toca al panel, deben leerse contra ese documento. El panel anterior queda en `apps/web-legacy` hasta F4.
+
 ## Brecha entre la línea base y el MVP
 
 `ScriptBaseDatosCRM.sql` ya define: RESIDENTES, CATEGORIAS, ESTADOS, USUARIOS, CORREOS, REPORTES, SOLICITUDES, NOTIFICACIONES, ASIGNACIONES. Para que sea realmente transaccional falta:

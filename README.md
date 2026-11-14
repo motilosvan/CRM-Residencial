@@ -27,7 +27,8 @@ El foco del proyecto es la **base de datos transaccional** (SQL Server): las reg
 | Consultas de bandeja, buzón, detalle e indicadores (lectura consistente SNAPSHOT) | Hecho |
 | Email Gateway con Gmail por IMAP (S3) | Hecho |
 | API HTTP de solo lectura para el buzón (Fastify, inicio de S4) | Hecho, sin login todavía |
-| Panel React/Vite: buzón unificado con datos reales | Hecho; las demás pantallas siguen con datos simulados |
+| Panel anterior (`apps/web-legacy`): buzón unificado con datos reales | Hecho; sus demás pantallas siguen con datos simulados |
+| Panel MailFlow (`apps/web`, F1): landing, inicio de sesión con código de un solo uso, layout y tema por conjunto | Hecho con servicios simulados; buzón real en F2 |
 | Sugerencias de IA vía OpenRouter u OpenCode Go (worker aparte, solo sugiere) | Hecho, apagado por defecto; aceptarlas llega con el login |
 | 311 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
 | Visor local de demostración | Provisional |
@@ -35,13 +36,15 @@ El foco del proyecto es la **base de datos transaccional** (SQL Server): las reg
 
 Detalle y justificación: [`docs/estudio-funcionalidad-y-bd-transaccional.md`](docs/estudio-funcionalidad-y-bd-transaccional.md) · Plan: [`docs/plan-desarrollo.md`](docs/plan-desarrollo.md) · Arquitectura: [`docs/arquitectura.md`](docs/arquitectura.md).
 
+Panel MailFlow (multi-conjunto, solo personal): [`docs/mailflow-entrevista.md`](docs/mailflow-entrevista.md) · Plan F1: [`docs/plan-mailflow-f1.md`](docs/plan-mailflow-f1.md).
+
 ## 🛠️ Tecnologías
 
 - **Microsoft SQL Server 2022** (Docker) — base de datos transaccional.
 - **Node.js 20+ y TypeScript** — lógica de negocio (`mssql`, `zod`) y API HTTP (`fastify`).
 - **imapflow + mailparser** — Email Gateway que lee Gmail por IMAP.
 - **OpenRouter u OpenCode Go** (opcional) — modelo para las sugerencias de clasificación.
-- **React + Vite + Tailwind** (`apps/web`) — panel administrativo.
+- **React 19 + Vite 7 + Tailwind 4 + shadcn/ui** (`apps/web`) — panel MailFlow: multi-conjunto, solo personal, con React Router 7, TanStack Query, Zustand y Zod. El panel anterior sigue en `apps/web-legacy` hasta la fase F4.
 - **Vitest** — pruebas de integración contra SQL Server real.
 
 ## ▶️ Ejecución local
@@ -68,8 +71,11 @@ npm run gate                # migraciones + lint + tipos + 311 pruebas
 ```bash
 npm run gateway             # lee Gmail cada 45 s y crea las solicitudes (Ctrl+C para detener)
 npm run api                 # API en http://127.0.0.1:3000/api
-npm run web                 # panel en http://localhost:5173 → menú "Bandeja Gmail"
+npm run web:legacy          # panel anterior en http://localhost:5173 → menú "Bandeja Gmail"
 ```
+
+`npm run web` abre el panel MailFlow nuevo (`apps/web`), que hoy usa servicios simulados; el buzón real vuelve en F2.
+Ambos usan el puerto 5173 por defecto: no los ejecute a la vez.
 
 La primera lectura de una cuenta trae solo los correos de los últimos `IMAP_DIAS_INICIALES` días (7 por defecto).
 Por defecto el gateway abre el buzón en solo lectura y no marca nada como leído (`IMAP_MARCAR_LEIDO`).
@@ -130,7 +136,8 @@ CRM-Residencial/
 ├── apps/api/test/                  # utilidades y datos solo de pruebas
 ├── apps/gateway/                   # Email Gateway IMAP (Gmail) → T1 + checkpoint T6
 ├── apps/worker-ia/                 # worker de sugerencias de IA (OpenRouter, OpenCode Go)
-├── apps/web/                       # panel React/Vite (proyecto npm propio)
+├── apps/web/                       # panel MailFlow: React 19 + Vite 7 + Tailwind 4 (proyecto npm propio)
+├── apps/web-legacy/                # panel anterior, referencia hasta F4
 ├── docs/                           # plan, estudio, arquitectura, alcance
 └── docker-compose.yml, .env.example
 ```
