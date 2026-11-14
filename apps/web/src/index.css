@@ -240,3 +240,27 @@
     to { transform: translateX(0); }
   }
 }
+
+/* ---------- Panel: halo de la pantalla de preparación y entrada del contenido (solo se añade) ---------- */
+@layer utilities {
+  @media (prefers-reduced-motion: no-preference) {
+    .mf-halo {
+      animation: mf-halo 1.6s ease-in-out infinite;
+    }
+    .mf-panel-entra {
+      animation: mf-aparece 0.5s ease-out both;
+    }
+    .mf-escalon {
+      animation: mf-escalon 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+      animation-delay: calc(var(--i, 0) * 70ms);
+    }
+  }
+  @keyframes mf-halo {
+    0%, 100% { opacity: 0.55; transform: scale(0.92); }
+    50% { opacity: 1; transform: scale(1.08); }
+  }
+  @keyframes mf-escalon {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}

@@ -9,3 +9,18 @@ if (jsdom) {
     value: jsdom.window.localStorage,
   });
 }
+
+// jsdom no implementa matchMedia (lo lee `useIsMobile` de shadcn). Valor por defecto: sin coincidencias.
+if (typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+      onchange: null,
+    }) as MediaQueryList;
+}
