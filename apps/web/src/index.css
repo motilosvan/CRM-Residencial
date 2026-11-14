@@ -210,3 +210,33 @@
     to { transform: translateX(-50%); }
   }
 }
+
+/* ---------- Inicio de sesión: transición entre pasos y feedback del código (solo se añade) ---------- */
+@layer utilities {
+  @media (prefers-reduced-motion: no-preference) {
+    .mf-paso-sig {
+      animation: mf-paso-sig 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    }
+    .mf-paso-ant {
+      animation: mf-paso-ant 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    }
+    .mf-sacude {
+      animation: mf-sacude 0.4s ease-in-out both;
+    }
+  }
+  @keyframes mf-paso-sig {
+    from { opacity: 0; transform: translateX(32px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes mf-paso-ant {
+    from { opacity: 0; transform: translateX(-32px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes mf-sacude {
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(5px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(2px); }
+    to { transform: translateX(0); }
+  }
+}
