@@ -15,5 +15,7 @@ const opciones: OpcionesMock = {
   sinConjuntos: import.meta.env.VITE_MOCK_SIN_CONJUNTOS === '1',
 };
 
+export { CODIGO_DEMO } from './mock/datos';
+
 export const conjuntosService: ConjuntosService = crearConjuntosMock(opciones);
 export const authService: AuthService = crearAuthMock(opciones);

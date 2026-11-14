@@ -6,14 +6,15 @@ import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
-import { authService } from '@/services';
+import { authService, CODIGO_DEMO } from '@/services';
 import { ErrorAuth, type CodigoEnviado } from '@/services/contratos';
-import { CODIGO_DEMO } from '@/services/mock/authMock';
 import { usePreferencias } from '@/store/preferencias';
 import { useSesion } from '@/store/sesion';
 import type { Conjunto } from '@/types/conjunto';
 import { esquemaPaso2, MENSAJE_NEUTRO, normalizarCodigo, type ValoresPaso2 } from './esquemas';
 import { useCuentaRegresiva } from './useCuentaRegresiva';
+
+const REENVIO_MS = 60_000;
 
 type ErrorCodigo =
   | { tipo: 'incorrecto'; intentos: number }
@@ -113,7 +114,10 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
       setTimeout(() => campoRef.current?.focus(), 0);
     } catch (e) {
       if (e instanceof ErrorAuth && e.codigo === 'BLOQUEADO') setError({ tipo: 'bloqueado', hasta: e.desbloqueoEn });
-      else setError({ tipo: 'reenvio' });
+      else if (e instanceof ErrorAuth && e.codigo === 'REENVIO_PRONTO') {
+        // El servidor aún tiene un código reciente: no es un fallo. Se rearma la espera sin avisar.
+        setEnvio((a) => ({ ...a, reenvioDisponibleEn: Date.now() + REENVIO_MS }));
+      } else setError({ tipo: 'reenvio' });
     } finally {
       setReenviando(false);
     }
@@ -198,10 +202,12 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
           <ArrowLeft aria-hidden="true" className="transition-transform duration-300 group-hover:-translate-x-0.5" />
           Cambiar correo
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => void reenviar()} disabled={segundos > 0 || reenviando || bloqueado}>
-          {reenviando && <Loader2 aria-hidden="true" className="animate-spin" />}
-          {segundos > 0 ? `Reenviar código en ${segundos} s` : 'Reenviar código'}
-        </Button>
+        {!bloqueado && (
+          <Button type="button" variant="outline" size="sm" onClick={() => void reenviar()} disabled={segundos > 0 || reenviando}>
+            {reenviando && <Loader2 aria-hidden="true" className="animate-spin" />}
+            {segundos > 0 ? `Reenviar código en ${segundos} s` : 'Reenviar código'}
+          </Button>
+        )}
       </div>
 
       {import.meta.env.DEV && (

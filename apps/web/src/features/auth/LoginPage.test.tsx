@@ -1,9 +1,9 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuthService, ConjuntosService } from '@/services/contratos';
+import { ErrorAuth, type AuthService, type ConjuntosService } from '@/services/contratos';
 import { CODIGO_DEMO } from '@/services/mock/datos';
 import { crearAuthMock } from '@/services/mock/authMock';
 import { crearConjuntosMock } from '@/services/mock/conjuntosMock';
@@ -15,7 +15,8 @@ const solicitarCodigo = vi.fn((p: Parameters<AuthService['solicitarCodigo']>[0])
 const verificarCodigo = vi.fn((p: Parameters<AuthService['verificarCodigo']>[0]) => authReal.verificarCodigo(p));
 const listar = vi.fn((s?: AbortSignal) => conjuntosReal.listar(s));
 
-vi.mock('@/services', () => ({
+vi.mock('@/services', async () => ({
+  CODIGO_DEMO: (await import('@/services/mock/datos')).CODIGO_DEMO,
   authService: {
     solicitarCodigo: (p: Parameters<AuthService['solicitarCodigo']>[0]) => solicitarCodigo(p),
     verificarCodigo: (p: Parameters<AuthService['verificarCodigo']>[0]) => verificarCodigo(p),
@@ -139,7 +140,7 @@ describe('LoginPage · paso 1', () => {
   });
 
   it('un fallo de red al pedir el código avisa y se queda en el paso 1', async () => {
-    solicitarCodigo.mockRejectedValueOnce(new (await import('@/services/contratos')).ErrorAuth('RED'));
+    solicitarCodigo.mockRejectedValueOnce(new ErrorAuth('RED'));
     const { user } = montar();
     await elegirConjunto(user, 'Parques del Occidente');
     await user.type(screen.getByLabelText(/correo/i), CORREO);
@@ -182,6 +183,9 @@ describe('LoginPage · paso 2', () => {
     expect(await screen.findByText(/volver a intentarlo a las/i)).toBeInTheDocument();
     expect(campoCodigo()).toBeDisabled();
     expect(useSesion.getState().sesion).toBeNull();
+    // Con el acceso bloqueado no se ofrece reenviar ni se muestra la cuenta regresiva.
+    expect(screen.queryByRole('button', { name: /reenviar/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/reenviar código en/i)).not.toBeInTheDocument();
   });
 
   it('"Reenviar" queda deshabilitado con cuenta regresiva de 60 s y luego se habilita', async () => {
@@ -256,6 +260,181 @@ describe('LoginPage · paso 2', () => {
     }
   });
 });
+
+async function bloquear(user: Usuario) {
+  for (let i = 0; i < 5; i++) {
+    await waitFor(() => expect(campoCodigo()).toBeEnabled());
+    await user.type(campoCodigo(), '000000');
+    await waitFor(() => expect(verificarCodigo).toHaveBeenCalledTimes(i + 1));
+  }
+  await screen.findByText(/volver a intentarlo a las/i);
+}
+
+const CORREO_DESCONOCIDO = 'desconocido@demo.mailflow.test';
+
+describe('LoginPage · foco de revisión (ronda 1)', () => {
+  it.each([CORREO, CORREO_DESCONOCIDO])('paso 1 con REENVIO_PRONTO (%s): vuelve con "Cambiar correo", reenvía y sigue sin error', async (correo) => {
+    const { user } = montar();
+    await pasarAlPaso2(user, correo);
+    await user.click(screen.getByRole('button', { name: /cambiar correo/i }));
+    await user.click(await screen.findByRole('button', { name: /enviar código/i }));
+    await screen.findByText(NEUTRO);
+    expect(solicitarCodigo).toHaveBeenCalledTimes(2);
+    await expect(solicitarCodigo.mock.results[1].value).rejects.toMatchObject({ codigo: 'REENVIO_PRONTO' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reenviar código en \d+ s/i })).toBeDisabled();
+  });
+
+  it('paso 1 con BLOQUEADO: mismo resultado visible con correo registrado y no registrado', async () => {
+    const vistos: string[] = [];
+    for (const correo of [CORREO, CORREO_DESCONOCIDO]) {
+      authReal = crearAuthMock({ ...SIN_LATENCIA, ahora: () => Date.now() });
+      verificarCodigo.mockClear();
+      const { user } = montar();
+      await pasarAlPaso2(user, correo);
+      await bloquear(user);
+      await user.click(screen.getByRole('button', { name: /cambiar correo/i }));
+      await user.click(await screen.findByRole('button', { name: /enviar código/i }));
+      await screen.findByText(NEUTRO);
+      expect(campoCodigo()).toBeDisabled();
+      expect(screen.queryByRole('button', { name: /reenviar/i })).not.toBeInTheDocument();
+      const alerta = screen.getByRole('alert').textContent ?? '';
+      expect(alerta).toMatch(/volver a intentarlo a las/i);
+      vistos.push(alerta);
+      cleanup();
+    }
+    expect(vistos[0]).toBe(vistos[1]);
+  });
+
+  it('tiempos visibles iguales con correo registrado y no registrado', async () => {
+    const datos: { contador: number; ventana: number; vigencia: number }[] = [];
+    for (const correo of [CORREO, CORREO_DESCONOCIDO]) {
+      authReal = crearAuthMock({ ...SIN_LATENCIA, ahora: () => Date.now() });
+      solicitarCodigo.mockClear();
+      const { user } = montar();
+      await pasarAlPaso2(user, correo);
+      const boton = screen.getByRole('button', { name: /reenviar código en \d+ s/i });
+      const contador = Number(/(\d+) s/.exec(boton.textContent ?? '')?.[1]);
+      const envio = await solicitarCodigo.mock.results[0].value;
+      datos.push({
+        contador,
+        ventana: envio.reenvioDisponibleEn - envio.venceEn,
+        vigencia: envio.venceEn - envio.reenvioDisponibleEn,
+      });
+      cleanup();
+    }
+    expect(datos[0].contador).toBeGreaterThanOrEqual(59);
+    expect(datos[1].contador).toBeGreaterThanOrEqual(59);
+    expect(datos[0].vigencia).toBe(datos[1].vigencia);
+    expect(datos[0].vigencia).toBe(10 * 60_000 - 60_000);
+  });
+
+  it('entrada no numérica: "12ab34" deja solo dígitos y no llama al servicio', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await user.type(campoCodigo(), '12ab34');
+    expect(campoCodigo()).toHaveValue('1234');
+    expect(verificarCodigo).not.toHaveBeenCalled();
+  });
+
+  it('entrada no numérica: solo letras no escribe nada ni gasta intentos', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await user.type(campoCodigo(), 'abcdef');
+    expect(campoCodigo()).toHaveValue('');
+    expect(verificarCodigo).not.toHaveBeenCalled();
+    expect(screen.queryByText(/te quedan/i)).not.toBeInTheDocument();
+  });
+
+  it('pegar texto con letras mezcladas no gasta intentos', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await user.click(campoCodigo());
+    await user.paste('ab 12-34 cd');
+    expect(campoCodigo()).toHaveValue('1234');
+    expect(verificarCodigo).not.toHaveBeenCalled();
+  });
+
+  it('paso 1: doble clic en "Enviar código" hace una sola llamada', async () => {
+    solicitarCodigo.mockImplementationOnce(
+      (p) => new Promise((resolver, rechazar) => setTimeout(() => authReal.solicitarCodigo(p).then(resolver, rechazar), 150)),
+    );
+    const { user } = montar();
+    await elegirConjunto(user, 'Parques del Occidente');
+    await user.type(screen.getByLabelText(/correo/i), CORREO);
+    await user.dblClick(screen.getByRole('button', { name: /enviar código/i }));
+    await screen.findByText(NEUTRO);
+    expect(solicitarCodigo).toHaveBeenCalledTimes(1);
+  });
+
+  it('paso 1: doble Enter hace una sola llamada', async () => {
+    solicitarCodigo.mockImplementationOnce(
+      (p) => new Promise((resolver, rechazar) => setTimeout(() => authReal.solicitarCodigo(p).then(resolver, rechazar), 150)),
+    );
+    const { user } = montar();
+    await elegirConjunto(user, 'Parques del Occidente');
+    await user.type(screen.getByLabelText(/correo/i), `${CORREO}{Enter}{Enter}`);
+    await screen.findByText(NEUTRO);
+    expect(solicitarCodigo).toHaveBeenCalledTimes(1);
+  });
+
+  it('paso 1: dos envíos simultáneos del formulario hacen una sola llamada', async () => {
+    solicitarCodigo.mockImplementationOnce(
+      (p) => new Promise((resolver, rechazar) => setTimeout(() => authReal.solicitarCodigo(p).then(resolver, rechazar), 150)),
+    );
+    const { user } = montar();
+    await elegirConjunto(user, 'Parques del Occidente');
+    await user.type(screen.getByLabelText(/correo/i), CORREO);
+    const form = screen.getByRole('button', { name: /enviar código/i }).closest('form') as HTMLFormElement;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await screen.findByText(NEUTRO);
+    expect(solicitarCodigo).toHaveBeenCalledTimes(1);
+  });
+
+  it('paso 2: dos envíos simultáneos (autoenvío + formulario) hacen una sola llamada', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    verificarCodigo.mockImplementationOnce(
+      (p) => new Promise((resolver, rechazar) => setTimeout(() => authReal.verificarCodigo(p).then(resolver, rechazar), 150)),
+    );
+    await user.type(campoCodigo(), '000000'); // onComplete: primer envío, en vuelo
+    const form = screen.getByRole('button', { name: /verific/i }).closest('form') as HTMLFormElement;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await screen.findByText(/te quedan 4 intentos/i);
+    expect(verificarCodigo).toHaveBeenCalledTimes(1);
+  });
+
+  it('"Reenviar" ignora REENVIO_PRONTO en silencio: sin error ni intentos gastados', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 61_000);
+    const boton = await screen.findByRole('button', { name: /^reenviar código$/i }, { timeout: 3000 });
+    await waitFor(() => expect(boton).toBeEnabled(), { timeout: 3000 });
+    solicitarCodigo.mockRejectedValueOnce(new ErrorAuth('REENVIO_PRONTO'));
+    await user.click(boton);
+    await waitFor(() => expect(solicitarCodigo).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: /reenviar/i })).toBeDisabled());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText(/no pudimos enviar/i)).not.toBeInTheDocument();
+    expect(verificarCodigo).not.toHaveBeenCalled();
+    expect(campoCodigo()).toBeEnabled();
+  });
+
+  it('"Reenviar" con fallo de red sí avisa', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 61_000);
+    const boton = await screen.findByRole('button', { name: /^reenviar código$/i }, { timeout: 3000 });
+    solicitarCodigo.mockRejectedValueOnce(new ErrorAuth('RED'));
+    await user.click(boton);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/no pudimos enviar un código nuevo/i);
+  });
+});
+
 
 describe('LoginPage · estructura', () => {
   it('tiene un solo h1 y un enlace para volver al inicio', async () => {
