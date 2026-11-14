@@ -28,13 +28,12 @@ function Lista({ copia = false }: { copia?: boolean }) {
   );
 }
 
-/** Cinta de garantías: solo hechos del producto. Se detiene con hover, foco y movimiento reducido. */
+/** Cinta de garantías: solo hechos del producto. Se detiene con hover y con movimiento reducido; no contiene nada enfocable. */
 export function Garantias() {
   return (
     <section
       aria-label="Garantías del servicio"
-      tabIndex={0}
-      className="mf-cinta overflow-hidden border-b border-border bg-background py-6 outline-offset-[-3px]"
+      className="mf-cinta overflow-hidden border-b border-border bg-background py-6"
     >
       <div className="mf-cinta-pista flex motion-reduce:w-full">
         <Lista />

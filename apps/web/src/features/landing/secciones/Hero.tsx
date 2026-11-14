@@ -1,11 +1,13 @@
+import type { CSSProperties, ReactNode } from 'react';
+import { FOCO_SOBRE_OSCURO } from '@/lib/foco';
 import { BotonAcceso } from './BotonAcceso';
 import { ENLACE_SUBRAYADO } from './Cabecera';
 import { EscenaProducto } from './EscenaProducto';
 
-function Linea({ retraso, children }: { retraso: number; children: React.ReactNode }) {
+function Linea({ retraso, children }: { retraso: number; children: ReactNode }) {
   return (
     <span className="block overflow-hidden pb-3 -mb-3">
-      <span className="mf-entra block" style={{ '--d': `${retraso}ms` } as React.CSSProperties}>
+      <span className="mf-entra block" style={{ '--d': `${retraso}ms` } as CSSProperties}>
         {children}
       </span>
     </span>
@@ -50,7 +52,7 @@ export function Hero() {
                     strokeLinecap="round"
                     vectorEffect="non-scaling-stroke"
                     className="mf-trazo-svg"
-                    style={{ '--d': '1100ms' } as React.CSSProperties}
+                    style={{ '--d': '1100ms' } as CSSProperties}
                   />
                 </svg>
               </span>
@@ -58,7 +60,7 @@ export function Hero() {
           </h1>
           <p
             className="mf-aparece mt-9 max-w-[50ch] text-lg leading-relaxed text-primary-foreground/80"
-            style={{ '--d': '700ms' } as React.CSSProperties}
+            style={{ '--d': '700ms' } as CSSProperties}
           >
             Tus residentes siguen escribiendo al correo de siempre. MailFlow lo convierte en una
             solicitud clasificada, priorizada y con seguimiento para que administración y soporte
@@ -66,12 +68,12 @@ export function Hero() {
           </p>
           <div
             className="mf-aparece mt-10 flex flex-wrap items-center gap-x-8 gap-y-4"
-            style={{ '--d': '850ms' } as React.CSSProperties}
+            style={{ '--d': '850ms' } as CSSProperties}
           >
             <BotonAcceso
               variant="secondary"
               brillo="bg-primary/15"
-              className="h-12 bg-primary-foreground px-7 text-base text-primary hover:bg-primary-foreground/90 focus-visible:border-primary-foreground focus-visible:outline-primary-foreground focus-visible:ring-primary-foreground"
+              className={`h-12 bg-primary-foreground px-7 text-base text-primary hover:bg-primary-foreground/90 ${FOCO_SOBRE_OSCURO}`}
             />
             <a
               href="#como-funciona"
@@ -82,7 +84,7 @@ export function Hero() {
           </div>
         </div>
 
-        <div className="mf-aparece mx-auto w-full max-w-lg lg:max-w-none" style={{ '--d': '500ms' } as React.CSSProperties}>
+        <div className="mf-aparece mx-auto w-full max-w-lg lg:max-w-none" style={{ '--d': '500ms' } as CSSProperties}>
           <EscenaProducto className="lg:ml-6" />
         </div>
       </div>

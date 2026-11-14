@@ -92,17 +92,19 @@ export function EscenaProducto({ className }: { className?: string }) {
               <Mail className="size-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">Residente · Torre 2</p>
-              <p className="text-xs text-muted-foreground">Correo recibido</p>
+              <p className="whitespace-nowrap text-sm font-medium">Residente · Torre 2</p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="text-xs text-muted-foreground">Correo recibido</p>
+                <span
+                  className={cn(
+                    'shrink-0 rounded-full bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground transition-opacity duration-300',
+                    fase === 1 ? 'opacity-100' : 'opacity-0',
+                  )}
+                >
+                  Clasificando…
+                </span>
+              </div>
             </div>
-            <span
-              className={cn(
-                'rounded-full bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground transition-opacity duration-300',
-                fase === 1 ? 'opacity-100' : 'opacity-0',
-              )}
-            >
-              Clasificando…
-            </span>
           </div>
           <p className="mt-3 font-heading text-sm font-semibold">Fuga de agua en el parqueadero</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">

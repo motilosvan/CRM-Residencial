@@ -4,6 +4,7 @@ import { PaginaError } from './PaginaError';
 export default function Pagina404() {
   return (
     <PaginaError
+      codigo="404"
       icono={SearchX}
       titulo="Página no encontrada"
       descripcion="La dirección que buscas no existe o fue movida."

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { Logo } from '@/components/marca/Logo';
+import { FOCO_SOBRE_OSCURO } from '@/lib/foco';
 import { cn } from '@/lib/utils';
 import { BotonAcceso } from './BotonAcceso';
 
@@ -67,7 +68,7 @@ export function Cabecera() {
             size="sm"
             variant="secondary"
             brillo="bg-primary/15"
-            className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 focus-visible:border-primary-foreground focus-visible:outline-primary-foreground focus-visible:ring-primary-foreground"
+            className={`bg-primary-foreground text-primary hover:bg-primary-foreground/90 ${FOCO_SOBRE_OSCURO}`}
           />
         )}
       </div>

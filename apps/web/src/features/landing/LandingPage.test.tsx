@@ -55,8 +55,20 @@ describe('LandingPage', () => {
     montar();
     const seguridad = screen.getByRole('region', { name: /seguridad/i });
     const acceso = within(seguridad).getByRole('link', { name: /iniciar sesión/i });
-    expect(acceso.className).toContain('focus-visible:ring-primary-foreground');
     expect(acceso.className).toContain('focus-visible:outline-primary-foreground');
+  });
+
+  it('C5: los CTA blancos sobre azul oscuro tienen anillo separado del botón (outline con offset)', () => {
+    montar();
+    const accesos = screen.getAllByRole('link', { name: /iniciar sesión/i }).filter((a) => a.className.includes('focus-visible:outline-primary-foreground'));
+    expect(accesos.length).toBeGreaterThanOrEqual(3); // cabecera transparente, hero y banda de seguridad
+    for (const a of accesos) {
+      expect(a.className).toContain('focus-visible:outline-2');
+      expect(a.className).toContain('focus-visible:outline-offset-4');
+      expect(a.className).toContain('focus-visible:outline-solid');
+      expect(a.className).toContain('focus-visible:outline-primary-foreground');
+      expect(a.className).toContain('focus-visible:ring-0');
+    }
   });
 });
 

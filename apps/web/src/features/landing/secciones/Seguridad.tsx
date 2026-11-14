@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react';
+import { FOCO_SOBRE_OSCURO } from '@/lib/foco';
 import { Revelar } from '@/components/movimiento/Revelar';
 import { BotonAcceso } from './BotonAcceso';
 
@@ -28,7 +30,7 @@ function Sello() {
         strokeLinecap="round"
         strokeLinejoin="round"
         className="mf-trazo-vista"
-        style={{ '--d': '800ms' } as React.CSSProperties}
+        style={{ '--d': '800ms' } as CSSProperties}
       />
     </svg>
   );
@@ -59,7 +61,7 @@ export function Seguridad() {
             <BotonAcceso
               variant="secondary"
               brillo="bg-primary/15"
-              className="focus-visible:border-primary-foreground focus-visible:outline-primary-foreground focus-visible:ring-primary-foreground"
+              className={FOCO_SOBRE_OSCURO}
             />
           </div>
         </Revelar>
@@ -82,7 +84,7 @@ export function Seguridad() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     className="mf-trazo-vista"
-                    style={{ '--d': `${1400 + i * 350}ms` } as React.CSSProperties}
+                    style={{ '--d': `${1400 + i * 350}ms` } as CSSProperties}
                   />
                 </svg>
                 <span className="leading-relaxed text-primary-foreground/90">{g}</span>

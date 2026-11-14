@@ -102,7 +102,7 @@ export default function InicioPage() {
                     </div>
                     <div className="mt-auto">
                       {esAdmin ? (
-                        <Button asChild variant="outline" size="sm">
+                        <Button asChild variant="outline" size="sm" className="max-sm:h-10">
                           <Link to={`/app/${conjuntoActivo.slug}/${p.ruta}`}>
                             {p.accion}
                             <ArrowRight aria-hidden="true" />
