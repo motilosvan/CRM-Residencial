@@ -40,7 +40,7 @@ function PanelMarca() {
         <ul className="mt-10 grid gap-5">
           {GARANTIAS.map(({ icono: Icono, texto }, i) => (
             <li key={texto} className="mf-aparece flex items-start gap-3.5 text-primary-foreground/85" style={{ '--d': `${300 + i * 130}ms` } as React.CSSProperties}>
-              <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full border border-primary-foreground/25 text-accent">
+              <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full border border-primary-foreground/25 text-acento">
                 <Icono aria-hidden="true" className="size-4" />
               </span>
               <span className="leading-relaxed">{texto}</span>

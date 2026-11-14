@@ -70,7 +70,7 @@ export function EscenaProducto({ className }: { className?: string }) {
       {/* Barra de progreso del recorrido */}
       <div className="h-1 overflow-hidden rounded-t-2xl bg-secondary">
         <div
-          className="h-full origin-left bg-accent transition-transform duration-700 ease-out"
+          className="h-full origin-left bg-acento transition-transform duration-700 ease-out"
           style={{ transform: `scaleX(${(fase + 1) / DURACIONES_FASES.length})` }}
         />
       </div>
@@ -109,7 +109,7 @@ export function EscenaProducto({ className }: { className?: string }) {
             Desde ayer gotea el techo del sótano y ya hay un charco junto a mi puesto.
           </p>
           {fase === 1 && (
-            <span className="mf-escaneo pointer-events-none absolute inset-0 border-b-2 border-accent bg-linear-to-b from-transparent via-accent/25 to-transparent" />
+            <span className="mf-escaneo pointer-events-none absolute inset-0 border-b-2 border-acento bg-linear-to-b from-transparent via-acento/25 to-transparent" />
           )}
         </div>
 
@@ -121,7 +121,7 @@ export function EscenaProducto({ className }: { className?: string }) {
             </span>
           </Fila>
           <Fila icono={<Flag className="size-3.5" />} etiqueta="Prioridad" visible={fase >= 3}>
-            <span className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-accent-foreground">Alta</span>
+            <span className="rounded-full bg-acento px-2.5 py-0.5 text-xs font-semibold text-acento-foreground">Alta</span>
           </Fila>
           <Fila icono={<UserRound className="size-3.5" />} etiqueta="Responsable" visible={fase >= 4}>
             <span className="flex size-6 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">

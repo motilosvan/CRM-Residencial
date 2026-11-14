@@ -68,7 +68,7 @@ function MiniPanel() {
     <div ref={ref} aria-hidden="true" style={actual.variables} className="mt-8 flex-1">
       <div className="flex h-full min-h-56 overflow-hidden rounded-2xl border border-border bg-background shadow-sm">
         <div className={cn('flex w-14 shrink-0 flex-col items-center gap-3 bg-primary py-4', suave)}>
-          <span className={cn('size-7 rounded-lg bg-accent', suave)} />
+          <span className={cn('size-7 rounded-lg bg-acento', suave)} />
           <span className="h-1.5 w-6 rounded-full bg-primary-foreground/40" />
           <span className="h-1.5 w-6 rounded-full bg-primary-foreground/25" />
           <span className="h-1.5 w-6 rounded-full bg-primary-foreground/25" />
@@ -86,7 +86,7 @@ function MiniPanel() {
             <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
               <span className={cn('size-6 shrink-0 rounded-full bg-secondary', suave)} />
               <span className="h-2 flex-1 rounded-full bg-muted" />
-              <span className={cn('h-5 w-12 rounded-full', destacada ? 'bg-accent' : 'bg-secondary', suave)} />
+              <span className={cn('h-5 w-12 rounded-full', destacada ? 'bg-acento' : 'bg-secondary', suave)} />
             </div>
           ))}
         </div>

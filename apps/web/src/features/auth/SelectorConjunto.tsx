@@ -27,7 +27,7 @@ export function SelectorConjunto({ conjuntos, valor, alCambiar, marcador = 'Elig
           role="combobox"
           aria-expanded={abierto}
           disabled={disabled}
-          className={cn('h-11 w-full justify-between bg-card px-3 font-normal hover:bg-muted aria-expanded:bg-muted', !elegido && 'text-muted-foreground', className)}
+          className={cn('h-11 w-full justify-between bg-card px-3 font-normal', !elegido && 'text-muted-foreground', className)}
           {...boton}
         >
           <span className="truncate">{elegido ? elegido.nombre : marcador}</span>

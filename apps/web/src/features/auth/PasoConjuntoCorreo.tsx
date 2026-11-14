@@ -97,7 +97,7 @@ export function PasoConjuntoCorreo({ borrador, alContinuar }: Props) {
             <FormItem>
               <FormLabel>Conjunto</FormLabel>
               {consulta.isPending ? (
-                <Skeleton className="h-11 w-full bg-muted" aria-label="Cargando conjuntos" role="status" />
+                <Skeleton className="h-11 w-full" aria-label="Cargando conjuntos" role="status" />
               ) : consulta.isError ? (
                 <EstadoError mensaje="No pudimos cargar los conjuntos. Revisa tu conexión e inténtalo de nuevo." alReintentar={() => void consulta.refetch()} />
               ) : (

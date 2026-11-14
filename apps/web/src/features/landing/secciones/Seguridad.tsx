@@ -10,7 +10,7 @@ const GARANTIAS = [
 
 function Sello() {
   return (
-    <svg viewBox="0 0 96 96" fill="none" aria-hidden="true" className="size-24 shrink-0 text-accent">
+    <svg viewBox="0 0 96 96" fill="none" aria-hidden="true" className="size-24 shrink-0 text-acento">
       <circle cx="48" cy="48" r="45" stroke="currentColor" strokeOpacity="0.25" strokeWidth="1.5" strokeDasharray="2 5" />
       <path
         d="M48 16 L74 26 V46 C74 62 63 73 48 80 C33 73 22 62 22 46 V26 Z"
@@ -72,7 +72,7 @@ export function Seguridad() {
           <ul className="mt-7 space-y-5">
             {GARANTIAS.map((g, i) => (
               <li key={g} className="flex gap-3">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="mt-0.5 size-6 shrink-0 text-accent">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="mt-0.5 size-6 shrink-0 text-acento">
                   <circle cx="12" cy="12" r="10.5" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.5" />
                   <path
                     d="M7.5 12.5 L10.5 15.5 L16.5 9"

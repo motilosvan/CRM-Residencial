@@ -15,8 +15,10 @@
   --secondary-foreground: oklch(0.2 0.025 255);
   --muted: oklch(0.95 0.008 90);
   --muted-foreground: oklch(0.45 0.02 255);
-  --accent: oklch(0.7607 0.1171 70.94);
+  --accent: oklch(0.95 0.0184 256.04);
   --accent-foreground: oklch(0.2 0.025 255);
+  --acento: oklch(0.7607 0.1171 70.94);
+  --acento-foreground: oklch(0.2 0.025 255);
   --destructive: oklch(0.5 0.19 27);
   --border: oklch(0.89 0.01 90);
   --input: oklch(0.89 0.01 90);
@@ -61,6 +63,8 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-acento: var(--acento);
+  --color-acento-foreground: var(--acento-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
   --color-input: var(--input);
@@ -119,12 +123,12 @@
     background: radial-gradient(closest-side, color-mix(in oklch, var(--ring) 55%, transparent), transparent);
   }
   .mf-resplandor-b {
-    background: radial-gradient(closest-side, color-mix(in oklch, var(--accent) 24%, transparent), transparent);
+    background: radial-gradient(closest-side, color-mix(in oklch, var(--acento) 24%, transparent), transparent);
   }
   .mf-foco {
     background: radial-gradient(
       280px circle at var(--x, 50%) var(--y, 50%),
-      color-mix(in oklch, var(--accent) 24%, transparent),
+      color-mix(in oklch, var(--acento) 24%, transparent),
       transparent 70%
     );
   }

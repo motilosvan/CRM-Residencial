@@ -4,7 +4,7 @@ interface Props {
   decorativo?: boolean;
 }
 
-/** Sobre cuya solapa es un trazo de flujo. Tinta: currentColor; detalle ámbar: var(--accent). */
+/** Sobre cuya solapa es un trazo de flujo. Tinta: currentColor; detalle ámbar: var(--acento). */
 export function Isotipo({ className = 'size-8', decorativo = true }: Props) {
   return (
     <svg
@@ -18,7 +18,7 @@ export function Isotipo({ className = 'size-8', decorativo = true }: Props) {
       <rect x="3" y="6" width="26" height="20" rx="4" stroke="currentColor" strokeWidth="2.5" />
       <path
         d="M5 11c4 0 5.5 8 11 8s7-8 11-8"
-        stroke="var(--accent)"
+        stroke="var(--acento)"
         strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"

@@ -39,7 +39,7 @@ export function Hero() {
                   aria-hidden="true"
                   viewBox="0 0 200 14"
                   preserveAspectRatio="none"
-                  className="absolute -bottom-1 left-0 h-3 w-full overflow-visible text-accent"
+                  className="absolute -bottom-1 left-0 h-3 w-full overflow-visible text-acento"
                 >
                   <path
                     d="M2 9 C 48 2, 118 13, 198 4"

@@ -60,7 +60,7 @@ function tinte(base: Oklch, l: number, factorC: number): Oklch {
   return { mode: 'oklch', l, c: base.c * factorC, h: base.h };
 }
 
-/** Tinte muy claro del primario: fondo de `--primary-claro`, `--sidebar-accent` y `--secondary` por defecto. */
+/** Tinte muy claro del primario: fondo de `--primary-claro`, `--accent`, `--sidebar-accent` y `--secondary` por defecto. */
 function tinteClaro(primario: Oklch): Oklch {
   return tinte(primario, 0.95, 0.25);
 }
@@ -75,7 +75,7 @@ function pares(c: Colores): Array<[string, Oklch, Oklch]> {
     ['primario/claro', claro, c.primario],
     ['sidebar-accent-foreground/sidebar-accent', claro, foregroundDe(claro)],
     ['primary-foreground/primario', c.primario, foregroundDe(c.primario)],
-    ['accent-foreground/acento', c.acento, foregroundDe(c.acento)],
+    ['acento-foreground/acento', c.acento, foregroundDe(c.acento)],
     ['secondary-foreground/secundario', secundario, foregroundDe(secundario)],
   ];
   // Un secundario explícito es un relleno de marca con su propio foreground; el primario solo
@@ -106,8 +106,10 @@ export function derivarTema(p: Paleta): VariablesTema {
     '--primary-foreground': texto(foregroundDe(c.primario)),
     '--primary-hover': texto({ ...c.primario, l: Math.max(0, c.primario.l - 0.06) }),
     '--primary-claro': texto(claro),
-    '--accent': texto(c.acento),
-    '--accent-foreground': texto(foregroundDe(c.acento)),
+    '--accent': texto(claro),
+    '--accent-foreground': texto(foregroundDe(claro)),
+    '--acento': texto(c.acento),
+    '--acento-foreground': texto(foregroundDe(c.acento)),
     '--secondary': texto(secundario),
     '--secondary-foreground': texto(foregroundDe(secundario)),
     '--ring': texto(ring),

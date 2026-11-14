@@ -6,7 +6,7 @@ import { PALETA_MAILFLOW, PALETA_PARQUES, FONDO } from './paletas';
 
 const CLAVES = [
   '--primary', '--primary-foreground', '--primary-hover', '--primary-claro',
-  '--accent', '--accent-foreground', '--secondary', '--secondary-foreground',
+  '--accent', '--accent-foreground', '--acento', '--acento-foreground', '--secondary', '--secondary-foreground',
   '--ring', '--sidebar-primary', '--sidebar-primary-foreground', '--sidebar-accent', '--sidebar-ring',
 ] as const;
 
@@ -46,8 +46,16 @@ describe('derivarTema', () => {
   });
   it('foreground oscuro sobre ámbar y claro sobre azul', () => {
     const t = derivarTema(PALETA_MAILFLOW);
-    expect(luz(t['--accent-foreground'])).toBeLessThan(0.5);
+    expect(luz(t['--acento-foreground'])).toBeLessThan(0.5);
     expect(luz(t['--primary-foreground'])).toBeGreaterThan(0.9);
+  });
+  it('--accent de interfaz es el tinte claro del primario; --acento es la marca', () => {
+    const t = derivarTema(PALETA_MAILFLOW);
+    expect(t['--accent']).toBe(t['--sidebar-accent']);
+    expect(t['--accent']).toBe(t['--primary-claro']);
+    expect(t['--accent-foreground']).toBe(t['--sidebar-accent-foreground']);
+    expect(t['--acento']).not.toBe(t['--accent']);
+    expect(luz(t['--acento'])).toBeGreaterThan(0.6);
   });
   it('hover más oscuro y claro más luminoso que el primario', () => {
     const t = derivarTema(PALETA_MAILFLOW);
@@ -81,6 +89,10 @@ describe('index.css coincide con derivarTema(PALETA_MAILFLOW)', () => {
   it('--background es el hex de marca', () => {
     expect(estatico('--background')).toBe(hexAOklch(FONDO));
   });
+  it('@theme inline mapea acento y acento-foreground', () => {
+    expect(css).toMatch(/--color-acento:\s*var\(--acento\)/);
+    expect(css).toMatch(/--color-acento-foreground:\s*var\(--acento-foreground\)/);
+  });
   it('@theme inline mapea primary-hover y primary-claro', () => {
     expect(css).toMatch(/--color-primary-hover:\s*var\(--primary-hover\)/);
     expect(css).toMatch(/--color-primary-claro:\s*var\(--primary-claro\)/);
@@ -88,6 +100,11 @@ describe('index.css coincide con derivarTema(PALETA_MAILFLOW)', () => {
 });
 
 describe('validación ampliada', () => {
+  it('valida el contraste del acento de marca con su foreground', () => {
+    // Acento oscuro: foregroundDe elige blanco o negro, siempre AA; se comprueba que el par existe.
+    const r = validarPaleta({ primario: '#1E3A5F', acento: '#E0A458' });
+    expect(r.problemas.some((p) => /acento/.test(p.par))).toBe(false);
+  });
   it('deriva --sidebar-accent-foreground', () => {
     expect(derivarTema(PALETA_MAILFLOW)['--sidebar-accent-foreground']).toMatch(/^oklch\(/);
   });
