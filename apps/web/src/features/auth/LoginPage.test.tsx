@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -61,7 +61,7 @@ function montar(ruta = '/login') {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { router, user: userEvent.setup() };
+  return { router, qc, user: userEvent.setup() };
 }
 
 type Usuario = ReturnType<typeof userEvent.setup>;
@@ -307,7 +307,7 @@ describe('LoginPage · foco de revisión (ronda 1)', () => {
   });
 
   it('tiempos visibles iguales con correo registrado y no registrado', async () => {
-    const datos: { contador: number; ventana: number; vigencia: number }[] = [];
+    const datos: { contador: number; vigencia: number }[] = [];
     for (const correo of [CORREO, CORREO_DESCONOCIDO]) {
       authReal = crearAuthMock({ ...SIN_LATENCIA, ahora: () => Date.now() });
       solicitarCodigo.mockClear();
@@ -318,7 +318,6 @@ describe('LoginPage · foco de revisión (ronda 1)', () => {
       const envio = await solicitarCodigo.mock.results[0].value;
       datos.push({
         contador,
-        ventana: envio.reenvioDisponibleEn - envio.venceEn,
         vigencia: envio.venceEn - envio.reenvioDisponibleEn,
       });
       cleanup();
@@ -435,7 +434,6 @@ describe('LoginPage · foco de revisión (ronda 1)', () => {
   });
 });
 
-
 describe('LoginPage · estructura', () => {
   it('tiene un solo h1 y un enlace para volver al inicio', async () => {
     montar();
@@ -444,5 +442,128 @@ describe('LoginPage · estructura', () => {
     const enlace = screen.getByRole('link', { name: /volver al inicio/i });
     expect(enlace).toHaveAttribute('href', '/');
     expect(within(document.body).getByText(/ley 1581/i)).toBeInTheDocument();
+  });
+});
+
+describe('LoginPage · ola final', () => {
+  it('B8: el marcador del correo usa un dominio de ejemplo', async () => {
+    montar();
+    expect(await screen.findByPlaceholderText('nombre@ejemplo.com')).toBeInTheDocument();
+  });
+
+  it('B2: /login con sesión viva redirige al panel del conjunto activo', async () => {
+    const sesion = await authReal.verificarCodigo({ conjuntoId: 'cj-parques', correo: CORREO, codigo: CODIGO_DEMO }).catch(async () => {
+      await authReal.solicitarCodigo({ conjuntoId: 'cj-parques', correo: CORREO });
+      return authReal.verificarCodigo({ conjuntoId: 'cj-parques', correo: CORREO, codigo: CODIGO_DEMO });
+    });
+    useSesion.getState().iniciar(sesion);
+    const { router } = montar('/login');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/app/parques-occidente'));
+  });
+
+  it('A2: al llegar la hora de desbloqueo se limpia el error y se ofrece pedir un código nuevo', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await bloquear(user);
+    await user.click(screen.getByRole('button', { name: /cambiar correo/i }));
+    const enviar = await screen.findByRole('button', { name: /enviar código/i });
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    fireEvent.click(enviar);
+    await screen.findByText(/volver a intentarlo a las/i);
+    expect(screen.queryByRole('button', { name: /pedir un código nuevo/i })).not.toBeInTheDocument();
+    await act(async () => {
+      vi.advanceTimersByTime(15 * 60_000 + 1000);
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    const pedir = screen.getByRole('button', { name: /pedir un código nuevo/i });
+    expect(pedir).toBeEnabled();
+    expect(campoCodigo()).toBeDisabled();
+    fireEvent.click(pedir);
+    await waitFor(() => expect(solicitarCodigo).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(campoCodigo()).toBeEnabled());
+    expect(screen.queryByRole('button', { name: /pedir un código nuevo/i })).not.toBeInTheDocument();
+  });
+
+  it('A2: desmontar limpia el temporizador de desbloqueo', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await bloquear(user);
+    await user.click(screen.getByRole('button', { name: /cambiar correo/i }));
+    const enviar = await screen.findByRole('button', { name: /enviar código/i });
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    fireEvent.click(enviar);
+    await screen.findByText(/volver a intentarlo a las/i);
+    const conPaso = vi.getTimerCount();
+    cleanup();
+    expect(vi.getTimerCount()).toBeLessThan(conPaso);
+  });
+
+  it('B3: "Cambiar correo" queda deshabilitado mientras se verifica', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    let liberar: () => void = () => {};
+    verificarCodigo.mockImplementationOnce(
+      (p) => new Promise((resolver, rechazar) => { liberar = () => authReal.verificarCodigo(p).then(resolver, rechazar); }),
+    );
+    await user.type(campoCodigo(), '000000');
+    await waitFor(() => expect(screen.getByRole('button', { name: /cambiar correo/i })).toBeDisabled());
+    liberar();
+    await waitFor(() => expect(screen.getByRole('button', { name: /cambiar correo/i })).toBeEnabled());
+  });
+
+  it('B7: el error del código se enlaza al campo con aria-describedby', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await user.type(campoCodigo(), '000000');
+    const alerta = await screen.findByRole('alert');
+    expect(alerta.id).not.toBe('');
+    expect(campoCodigo().getAttribute('aria-describedby') ?? '').toContain(alerta.id);
+  });
+
+  it('C2: tras un código erróneo el foco vuelve al campo, queda vacío y hay un solo mensaje', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await user.type(campoCodigo(), '000000');
+    expect(await screen.findByText(/te quedan 4 intentos/i)).toBeInTheDocument();
+    await waitFor(() => expect(campoCodigo()).toHaveFocus());
+    expect(campoCodigo()).toHaveValue('');
+    expect(screen.queryByText(/escribe los 6 dígitos/i)).not.toBeInTheDocument();
+  });
+
+  it('C2: enviar el campo vacío tras un error muestra solo el mensaje de validación', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await user.type(campoCodigo(), '000000');
+    await screen.findByText(/te quedan 4 intentos/i);
+    await user.click(screen.getByRole('button', { name: /verificar código/i }));
+    expect(screen.queryByText(/te quedan 4 intentos/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/escribe los 6 dígitos|código incorrecto/i)).toHaveLength(1);
+    expect(screen.getByText(/escribe los 6 dígitos/i)).toBeInTheDocument();
+  });
+
+  it('B1: un fallo al refrescar no tapa el selector si ya hay conjuntos cargados', async () => {
+    const { qc } = montar();
+    await screen.findByRole('combobox', { name: /conjunto/i });
+    listar.mockRejectedValueOnce(new Error('sin red'));
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: ['conjuntos'] });
+    });
+    expect(qc.getQueryState(['conjuntos'])?.status).toBe('error');
+    // TanStack notifica a los componentes en el siguiente tick: sin esperar, la ausencia sería trivial.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.queryByText(/no pudimos cargar los conjuntos/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /conjunto/i })).toBeInTheDocument();
+  });
+
+  it('C6: la hora de desbloqueo no se parte en líneas (espacios de no separación)', async () => {
+    const { user } = montar();
+    await pasarAlPaso2(user);
+    await bloquear(user);
+    const aviso = screen.getByRole('alert').textContent ?? '';
+    const hora = /a las (.+)$/.exec(aviso)?.[1] ?? '';
+    expect(hora).toMatch(/\d/);
+    expect(hora).not.toMatch(/ /);
   });
 });

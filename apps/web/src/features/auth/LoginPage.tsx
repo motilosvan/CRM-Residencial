@@ -1,9 +1,10 @@
 import { ArrowLeft, Clock, KeyRound, ShieldCheck, Timer } from 'lucide-react';
-import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { useState, type CSSProperties } from 'react';
+import { Link, Navigate, useSearchParams } from 'react-router';
 import { Logo } from '@/components/marca/Logo';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { useSesion } from '@/store/sesion';
 import type { Conjunto } from '@/types/conjunto';
 import type { CodigoEnviado } from '@/services/contratos';
 import type { ValoresPaso1 } from './esquemas';
@@ -34,12 +35,12 @@ function PanelMarca() {
       </Link>
 
       <div className="hidden max-w-md lg:block">
-        <p className="mf-aparece font-heading text-4xl font-extrabold leading-[1.08] tracking-[-0.03em] xl:text-5xl" style={{ '--d': '100ms' } as React.CSSProperties}>
+        <p className="mf-aparece font-heading text-4xl font-extrabold leading-[1.08] tracking-[-0.03em] xl:text-5xl" style={{ '--d': '100ms' } as CSSProperties}>
           Cada correo de tu conjunto, con un responsable.
         </p>
         <ul className="mt-10 grid gap-5">
           {GARANTIAS.map(({ icono: Icono, texto }, i) => (
-            <li key={texto} className="mf-aparece flex items-start gap-3.5 text-primary-foreground/85" style={{ '--d': `${300 + i * 130}ms` } as React.CSSProperties}>
+            <li key={texto} className="mf-aparece flex items-start gap-3.5 text-primary-foreground/85" style={{ '--d': `${300 + i * 130}ms` } as CSSProperties}>
               <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full border border-primary-foreground/25 text-acento">
                 <Icono aria-hidden="true" className="size-4" />
               </span>
@@ -85,6 +86,7 @@ export default function LoginPage() {
   const [borrador, setBorrador] = useState<Partial<ValoresPaso1>>({});
   const [paso2, setPaso2] = useState<DatosPaso2 | null>(null);
   const [sentido, setSentido] = useState<'sig' | 'ant'>('sig');
+  const sesion = useSesion((s) => s.sesion);
 
   function continuar(r: ResultadoPaso1) {
     setBorrador({ conjuntoId: r.conjunto.id, correo: r.correo });
@@ -98,6 +100,8 @@ export default function LoginPage() {
   }
 
   const paso = paso2 ? 2 : 1;
+
+  if (sesion) return <Navigate replace to={`/app/${sesion.conjuntoActivo.slug}`} />;
 
   return (
     <div className="grid min-h-screen grid-rows-[auto_1fr] bg-background lg:grid-cols-[5fr_6fr] lg:grid-rows-1">

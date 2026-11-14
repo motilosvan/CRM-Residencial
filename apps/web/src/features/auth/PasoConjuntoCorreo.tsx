@@ -98,7 +98,7 @@ export function PasoConjuntoCorreo({ borrador, alContinuar }: Props) {
               <FormLabel>Conjunto</FormLabel>
               {consulta.isPending ? (
                 <Skeleton className="h-11 w-full" aria-label="Cargando conjuntos" role="status" />
-              ) : consulta.isError ? (
+              ) : consulta.isError && consulta.data === undefined ? (
                 <EstadoError mensaje="No pudimos cargar los conjuntos. Revisa tu conexión e inténtalo de nuevo." alReintentar={() => void consulta.refetch()} />
               ) : (
                 <>
@@ -135,7 +135,7 @@ export function PasoConjuntoCorreo({ borrador, alContinuar }: Props) {
             <FormItem>
               <FormLabel>Correo electrónico</FormLabel>
               <FormControl>
-                <Input type="email" inputMode="email" autoComplete="email" placeholder="nombre@correo.com" className="h-11" {...field} />
+                <Input type="email" inputMode="email" autoComplete="email" placeholder="nombre@ejemplo.com" className="h-11" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>

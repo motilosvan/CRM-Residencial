@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import Pagina403 from '@/features/errores/Pagina403';
 import Pagina404 from '@/features/errores/Pagina404';
 import { useConjuntos } from '@/hooks/useConjuntos';
+import { usePreferencias } from '@/store/preferencias';
 import { useSesion } from '@/store/sesion';
 import { aplicarTema } from '@/tema/aplicarTema';
 import AppLayout from './AppLayout';
@@ -14,6 +15,7 @@ export default function GuardaConjunto() {
   const sesion = useSesion((s) => s.sesion);
   const motivoCierre = useSesion((s) => s.motivoCierre);
   const cambiarConjunto = useSesion((s) => s.cambiarConjunto);
+  const recordarConjunto = usePreferencias((s) => s.recordarConjunto);
   const conjuntos = useConjuntos();
 
   const esPropio = !!sesion?.conjuntos.some((c) => c.slug === slug);
@@ -24,6 +26,11 @@ export default function GuardaConjunto() {
   useEffect(() => {
     if (debeCambiar) cambiarConjunto(slug);
   }, [debeCambiar, slug, cambiarConjunto]);
+
+  // El último conjunto activo (no solo el de la entrada) es el que el login preselecciona.
+  useEffect(() => {
+    if (activoSlug) recordarConjunto(activoSlug);
+  }, [activoSlug, recordarConjunto]);
 
   const paleta = sesion?.conjuntoActivo.paleta;
   const hayActivo = !!sesion;

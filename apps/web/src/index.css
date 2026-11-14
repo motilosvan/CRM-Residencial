@@ -139,11 +139,11 @@
 
   @media (prefers-reduced-motion: no-preference) {
     .mf-entra {
-      animation: mf-entra 1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+      animation: mf-entra 1s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
       animation-delay: var(--d, 0ms);
     }
     .mf-aparece {
-      animation: mf-aparece 0.9s ease-out both;
+      animation: mf-aparece 0.9s ease-out backwards;
       animation-delay: var(--d, 0ms);
     }
     .mf-trazo-svg {
@@ -219,13 +219,13 @@
 @layer utilities {
   @media (prefers-reduced-motion: no-preference) {
     .mf-paso-sig {
-      animation: mf-paso-sig 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+      animation: mf-paso-sig 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
     }
     .mf-paso-ant {
-      animation: mf-paso-ant 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+      animation: mf-paso-ant 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
     }
     .mf-sacude {
-      animation: mf-sacude 0.4s ease-in-out both;
+      animation: mf-sacude 0.4s ease-in-out backwards;
     }
   }
   @keyframes mf-paso-sig {
@@ -252,10 +252,10 @@
       animation: mf-halo 1.6s ease-in-out infinite;
     }
     .mf-panel-entra {
-      animation: mf-aparece 0.5s ease-out both;
+      animation: mf-aparece 0.5s ease-out backwards;
     }
     .mf-escalon {
-      animation: mf-escalon 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+      animation: mf-escalon 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
       animation-delay: calc(var(--i, 0) * 70ms);
     }
   }

@@ -10,7 +10,7 @@ export function Proveedores({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       {children}
-      <Toaster theme="light" />
+      <Toaster theme="light" containerAriaLabel="Notificaciones" />
     </QueryClientProvider>
   );
 }

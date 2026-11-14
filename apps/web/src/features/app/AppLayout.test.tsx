@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Conjunto, Rol, Sesion } from '@/types/conjunto';
 
 const listar = vi.fn();
@@ -13,11 +13,13 @@ const inactividad = { avisoVisible: false, segundosRestantes: 42, seguir };
 vi.mock('@/hooks/useInactividad', () => ({ useInactividad: () => inactividad }));
 
 import { rutas } from '@/router';
+import { Proveedores } from '@/proveedores';
+import { PALETA_PARQUES } from '@/tema/paletas';
 import { useSesion } from '@/store/sesion';
 import { ENTRADAS } from './navegacion';
 import PantallaPreparando from './PantallaPreparando';
 
-const uno: Conjunto = { id: 'a', slug: 'uno', nombre: 'Torres de Uno', paleta: { primario: '#355E3B', acento: '#D6A64F' } };
+const uno: Conjunto = { id: 'a', slug: 'uno', nombre: 'Torres de Uno', paleta: PALETA_PARQUES };
 const dos: Conjunto = { id: 'b', slug: 'dos', nombre: 'Altos Dos' };
 
 function sesionDe(rol: Rol, activo: Conjunto, conjuntos: Conjunto[]): Sesion {
@@ -67,6 +69,53 @@ describe('navegacion', () => {
   it('las entradas solo-Administrador son las esperadas', () => {
     const etiquetas = ENTRADAS.filter((e) => e.soloAdmin).map((e) => e.etiqueta);
     expect(etiquetas.sort()).toEqual([...SOLO_ADMIN].sort());
+  });
+});
+
+describe('AppLayout · accesibilidad', () => {
+  it('C3: hay un solo landmark main y el salto lleva a él', async () => {
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/inicio');
+    await screen.findByRole('navigation', { name: 'Secciones del panel' });
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(document.querySelectorAll('main')).toHaveLength(1);
+    expect(document.getElementById('contenido')).not.toBeNull();
+  });
+
+  it('C1: ningún texto accesible del panel queda en inglés', async () => {
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/inicio');
+    await screen.findByRole('navigation', { name: 'Secciones del panel' });
+    expect(document.body.textContent).not.toMatch(/toggle sidebar/i);
+    expect(document.querySelector('[title="Toggle Sidebar"], [aria-label="Toggle Sidebar"]')).toBeNull();
+  });
+
+  it('C1: el panel móvil se anuncia en español', async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({
+      matches: true,
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    const anchoOriginal = window.innerWidth;
+    window.innerWidth = 375;
+    onTestFinished(() => {
+      window.innerWidth = anchoOriginal;
+    });
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/inicio');
+    const boton = await screen.findByRole('button', { name: /mostrar u ocultar el menú/i });
+    await userEvent.click(boton);
+    const dialogo = await screen.findByRole('dialog');
+    expect(dialogo).toHaveAccessibleName(/menú/i);
+    expect(dialogo.textContent).not.toMatch(/displays the mobile sidebar/i);
+    expect(dialogo).not.toHaveAccessibleName('Sidebar');
+  });
+
+  it('C1: el aviso de notificaciones (Toaster) está en español', () => {
+    render(<Proveedores><span /></Proveedores>);
+    expect(document.querySelector('[aria-label^="Notifications"]')).toBeNull();
+    expect(document.querySelector('[aria-label^="Notificaciones"]')).not.toBeNull();
   });
 });
 

@@ -15,6 +15,7 @@ import { esquemaPaso2, MENSAJE_NEUTRO, normalizarCodigo, type ValoresPaso2 } fro
 import { useCuentaRegresiva } from './useCuentaRegresiva';
 
 const REENVIO_MS = 60_000;
+const ID_ERROR = 'error-codigo';
 
 type ErrorCodigo =
   | { tipo: 'incorrecto'; intentos: number }
@@ -33,7 +34,8 @@ interface Props {
 
 /** Hora local con punto final solo si el formato no lo trae ("10:41 a. m." ya termina en punto). */
 function horaConPunto(epoch: number): string {
-  const h = new Date(epoch).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' });
+  // Espacios de no separación: "10:41 a. m." no debe partirse entre líneas.
+  const h = new Date(epoch).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' }).replace(/\s/g, '\u00a0');
   return h.endsWith('.') ? h : `${h}.`;
 }
 
@@ -63,16 +65,39 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
   const [verificando, setVerificando] = useState(false);
   const [reenviando, setReenviando] = useState(false);
   const [fallos, setFallos] = useState(0);
+  // Al vencer el bloqueo el código anterior ya no sirve: hay que pedir uno nuevo.
+  const [requiereNuevo, setRequiereNuevo] = useState(false);
   const enVuelo = useRef(false);
   const campoRef = useRef<HTMLInputElement>(null);
+  const pedirFoco = useRef(false);
 
   const form = useForm<ValoresPaso2>({ resolver: zodResolver(esquemaPaso2), defaultValues: { codigo: '' } });
   const segundos = useCuentaRegresiva(envio.reenvioDisponibleEn);
   const bloqueado = error?.tipo === 'bloqueado';
 
+  const hastaBloqueo = error?.tipo === 'bloqueado' ? error.hasta : undefined;
+  const campoDeshabilitado = verificando || bloqueado || requiereNuevo;
+
   useEffect(() => {
     campoRef.current?.focus();
   }, []);
+
+  // El foco vuelve al campo cuando este se reactiva tras un error (no antes: deshabilitado no lo recibe).
+  useEffect(() => {
+    if (pedirFoco.current && !campoDeshabilitado) {
+      pedirFoco.current = false;
+      campoRef.current?.focus();
+    }
+  });
+
+  useEffect(() => {
+    if (!hastaBloqueo) return;
+    const t = setTimeout(() => {
+      setError(null);
+      setRequiereNuevo(true);
+    }, Math.max(0, hastaBloqueo - Date.now()));
+    return () => clearTimeout(t);
+  }, [hastaBloqueo]);
 
   async function verificar({ codigo }: ValoresPaso2) {
     if (enVuelo.current || bloqueado) return;
@@ -99,9 +124,8 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
       form.reset({ codigo: '' });
     }
     enVuelo.current = false;
+    pedirFoco.current = true;
     setVerificando(false);
-    // El campo se reactiva en el siguiente ciclo; el foco vuelve para escribir de nuevo.
-    setTimeout(() => campoRef.current?.focus(), 0);
   }
 
   async function reenviar() {
@@ -110,8 +134,9 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
     setError(null);
     try {
       setEnvio(await authService.solicitarCodigo({ conjuntoId: conjunto.id, correo }));
+      setRequiereNuevo(false);
       form.reset({ codigo: '' });
-      setTimeout(() => campoRef.current?.focus(), 0);
+      pedirFoco.current = true;
     } catch (e) {
       if (e instanceof ErrorAuth && e.codigo === 'BLOQUEADO') setError({ tipo: 'bloqueado', hasta: e.desbloqueoEn });
       else if (e instanceof ErrorAuth && e.codigo === 'REENVIO_PRONTO') {
@@ -122,8 +147,6 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
       setReenviando(false);
     }
   }
-
-  const campoDeshabilitado = verificando || bloqueado;
 
   return (
     <div className="grid gap-5">
@@ -138,7 +161,7 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
       </p>
 
       <Form {...form}>
-        <form onSubmit={(e) => void form.handleSubmit(verificar)(e)} noValidate className="grid gap-5">
+        <form onSubmit={(e) => void form.handleSubmit(verificar, () => setError(null))(e)} noValidate className="grid gap-5">
           <FormField
             control={form.control}
             name="codigo"
@@ -146,7 +169,7 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
               <FormItem>
                 <FormLabel>Código de 6 dígitos</FormLabel>
                 <div key={fallos} className={fallos > 0 ? 'mf-sacude' : undefined}>
-                  <FormControl>
+                  <FormControl {...(error ? { 'aria-describedby': ID_ERROR } : {})}>
                     <InputOTP
                       ref={campoRef}
                       maxLength={6}
@@ -158,15 +181,15 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
                       onChange={(v) => field.onChange(normalizarCodigo(v))}
                       onBlur={field.onBlur}
                       onComplete={() => void form.handleSubmit(verificar)()}
-                      containerClassName="justify-between gap-1.5 sm:justify-start sm:gap-2.5"
+                      containerClassName="w-full gap-1.5 sm:gap-2.5"
                     >
-                      <InputOTPGroup className="w-full gap-1.5 sm:w-auto sm:gap-2.5">
+                      <InputOTPGroup className="w-full gap-1.5 sm:gap-2.5">
                         {[0, 1, 2, 3, 4, 5].map((i) => (
                           <InputOTPSlot
                             key={i}
                             index={i}
                             aria-invalid={error?.tipo === 'incorrecto' || undefined}
-                            className="h-14 min-w-0 flex-1 rounded-md border bg-card font-heading text-xl font-semibold first:rounded-l-md first:border-l last:rounded-r-md sm:w-12 sm:flex-none"
+                            className="h-14 min-w-0 flex-1 rounded-md border bg-card font-heading text-xl font-semibold first:rounded-l-md first:border-l last:rounded-r-md"
                           />
                         ))}
                       </InputOTPGroup>
@@ -179,7 +202,7 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
           />
 
           {error && (
-            <p role="alert" className="rounded-md border border-destructive px-3 py-2 text-sm text-destructive">
+            <p id={ID_ERROR} role="alert" className="rounded-md border border-destructive px-3 py-2 text-sm text-destructive">
               {textoError(error)}
             </p>
           )}
@@ -198,14 +221,14 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
       </Form>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={alCambiarCorreo} className="-ml-2 group">
+        <Button type="button" variant="ghost" size="sm" onClick={alCambiarCorreo} disabled={verificando} className="-ml-2 group max-sm:h-10">
           <ArrowLeft aria-hidden="true" className="transition-transform duration-300 group-hover:-translate-x-0.5" />
           Cambiar correo
         </Button>
         {!bloqueado && (
-          <Button type="button" variant="outline" size="sm" onClick={() => void reenviar()} disabled={segundos > 0 || reenviando}>
+          <Button type="button" variant="outline" size="sm" className="max-sm:h-10" onClick={() => void reenviar()} disabled={segundos > 0 || reenviando}>
             {reenviando && <Loader2 aria-hidden="true" className="animate-spin" />}
-            {segundos > 0 ? `Reenviar código en ${segundos} s` : 'Reenviar código'}
+            {segundos > 0 ? `Reenviar código en ${segundos} s` : requiereNuevo ? 'Pedir un código nuevo' : 'Reenviar código'}
           </Button>
         )}
       </div>

@@ -56,4 +56,14 @@ describe('Revelar', () => {
     unmount();
     expect(observador.disconnect).toHaveBeenCalled();
   });
+
+  it('B4: una vez revelado no deja transform ni translate permanentes', () => {
+    vi.stubGlobal('IntersectionObserver', ObservadorFalso);
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    render(<Revelar>Contenido</Revelar>);
+    const el = screen.getByText('Contenido');
+    expect(el).toHaveAttribute('data-revelado', 'true');
+    expect(el.className).not.toMatch(/translate-y-0/);
+    expect(el.className).not.toMatch(/(^|\s)translate-y-5/);
+  });
 });

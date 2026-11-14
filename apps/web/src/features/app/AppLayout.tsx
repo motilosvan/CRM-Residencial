@@ -60,9 +60,9 @@ export default function AppLayout() {
             <MenuUsuario usuario={sesion.usuario} />
           </div>
         </header>
-        <main id="contenido" tabIndex={-1} className="mf-panel-entra flex-1 p-4 focus:outline-none sm:p-6 lg:p-8">
+        <div id="contenido" tabIndex={-1} className="mf-panel-entra flex-1 p-4 focus:outline-none sm:p-6 lg:p-8">
           <Outlet />
-        </main>
+        </div>
       </SidebarInset>
       <DialogoInactividad abierto={avisoVisible} segundos={segundosRestantes} alSeguir={seguir} />
     </SidebarProvider>

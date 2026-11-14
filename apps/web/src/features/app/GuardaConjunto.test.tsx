@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Conjunto, Sesion } from '@/types/conjunto';
-import type { Paleta } from '@/tema/paletas';
+import { PALETA_MAILFLOW, PALETA_PARQUES, type Paleta } from '@/tema/paletas';
+import { CONJUNTOS_DEMO } from '@/services/mock/datos';
 
 const listar = vi.fn();
 vi.mock('@/services', () => ({ conjuntosService: { listar: (s?: AbortSignal) => listar(s) } }));
@@ -12,11 +13,12 @@ const aplicarTema = vi.fn();
 vi.mock('@/tema/aplicarTema', () => ({ aplicarTema: (...a: unknown[]) => aplicarTema(...a) }));
 
 import { rutas } from '@/router';
+import { usePreferencias } from '@/store/preferencias';
 import { useSesion } from '@/store/sesion';
 
-const paletaPropio: Paleta = { primario: '#355E3B', acento: '#D6A64F' };
-const paletaOtro: Paleta = { primario: '#7A2E4D', acento: '#E8B04A' };
-const paletaAjeno: Paleta = { primario: '#2F5D8A', acento: '#C9A227' };
+const paletaPropio: Paleta = PALETA_PARQUES;
+const paletaOtro: Paleta = PALETA_MAILFLOW;
+const paletaAjeno: Paleta = CONJUNTOS_DEMO[2].paleta!;
 const propio: Conjunto = { id: 'a', slug: 'propio', nombre: 'Propio Uno', paleta: paletaPropio };
 const otro: Conjunto = { id: 'b', slug: 'otro', nombre: 'Otro Dos', paleta: paletaOtro };
 const ajeno: Conjunto = { id: 'c', slug: 'ajeno', nombre: 'Ajeno Tres', paleta: paletaAjeno };
@@ -51,6 +53,7 @@ beforeEach(() => {
   aplicarTema.mockReset();
   listar.mockResolvedValue([propio, otro, ajeno]);
   useSesion.setState({ sesion: null, motivoCierre: null });
+  usePreferencias.setState({ ultimoConjuntoSlug: null });
 });
 
 describe('GuardaConjunto', () => {
@@ -118,6 +121,23 @@ describe('GuardaConjunto', () => {
     expect(qc.getQueryState(['conjuntos'])?.status).toBe('error');
     expect(screen.getByRole('heading', { name: 'Inicio' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument();
+  });
+});
+
+describe('GuardaConjunto: preselección del conjunto', () => {
+  it('entrar por A, cambiar a B y cerrar sesión: el login preselecciona B', async () => {
+    useSesion.setState({ sesion: sesionDe(propio, [propio, otro]) });
+    const { router: r } = montar('/app/propio/inicio');
+    await screen.findByRole('heading', { name: 'Inicio' });
+    expect(usePreferencias.getState().ultimoConjuntoSlug).toBe('propio');
+    await act(async () => {
+      await r.navigate('/app/otro/inicio');
+    });
+    await waitFor(() => expect(useSesion.getState().sesion?.conjuntoActivo.slug).toBe('otro'));
+    await waitFor(() => expect(usePreferencias.getState().ultimoConjuntoSlug).toBe('otro'));
+    act(() => useSesion.getState().cerrar('manual'));
+    await waitFor(() => expect(r.state.location.pathname).toBe('/login'));
+    expect(await screen.findByRole('combobox', { name: /conjunto/i })).toHaveTextContent('Otro Dos');
   });
 });
 

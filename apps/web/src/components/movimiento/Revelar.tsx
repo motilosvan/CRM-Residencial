@@ -16,8 +16,8 @@ export function Revelar({ retraso = 0, className, style, children, ...resto }: P
       data-revelado={enVista}
       style={{ transitionDelay: retraso ? `${retraso}ms` : undefined, ...style }}
       className={cn(
-        'transition-[opacity,transform] duration-700 ease-out',
-        enVista ? 'translate-y-0 opacity-100' : 'translate-y-5 opacity-0',
+        'transition-[opacity,translate] duration-700 ease-out',
+        enVista ? 'opacity-100' : 'translate-y-5 opacity-0',
         className,
       )}
       {...resto}
