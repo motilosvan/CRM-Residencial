@@ -18,7 +18,7 @@ function iniciales(nombre: string): string {
 }
 
 export default function MenuUsuario({ usuario }: { usuario: Usuario }) {
-  const cerrar = useSesion((s) => s.cerrar);
+  const salir = useSesion((s) => s.salir);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -40,7 +40,7 @@ export default function MenuUsuario({ usuario }: { usuario: Usuario }) {
           <p className="mt-1 text-xs text-muted-foreground">{ROLES[usuario.rol]}</p>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => cerrar('manual')}>
+        <DropdownMenuItem onSelect={() => salir('manual')}>
           <LogOut aria-hidden="true" />
           Cerrar sesión
         </DropdownMenuItem>

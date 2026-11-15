@@ -7,6 +7,8 @@ import {
   useSesion,
 } from './sesion';
 import { usePreferencias } from './preferencias';
+import { authService } from '@/services';
+import { ErrorAuth } from '@/services/contratos';
 
 const AHORA = new Date('2026-01-10T12:00:00Z').getTime();
 
@@ -23,7 +25,7 @@ function crearSesion(ultimaActividad = AHORA): Sesion {
 
 function reiniciar() {
   localStorage.clear();
-  useSesion.setState({ sesion: null, motivoCierre: null });
+  useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null, errorCambio: null });
   usePreferencias.setState({ ultimoConjuntoSlug: null });
 }
 
@@ -54,16 +56,23 @@ describe('useSesion', () => {
     reiniciar();
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     reiniciar();
   });
 
-  it('iniciar guarda la sesión con la hora actual y limpia el motivo', () => {
-    useSesion.setState({ motivoCierre: 'manual' });
+  it('empieza en estado cargando', () => {
+    expect(useSesion.getInitialState().estado).toBe('cargando');
+  });
+
+  it('iniciar guarda la sesión con la hora actual, limpia el motivo y deja el estado lista', () => {
+    useSesion.setState({ motivoCierre: 'manual', estado: 'cargando' });
     useSesion.getState().iniciar(crearSesion(1));
-    const { sesion, motivoCierre } = useSesion.getState();
+    const { sesion, motivoCierre, estado, ultimaActividad } = useSesion.getState();
     expect(sesion?.ultimaActividad).toBe(AHORA);
+    expect(ultimaActividad).toBe(AHORA);
     expect(motivoCierre).toBeNull();
+    expect(estado).toBe('lista');
   });
 
   it('cerrar vacía la sesión, guarda el motivo y conserva el último conjunto', () => {
@@ -71,110 +80,163 @@ describe('useSesion', () => {
     useSesion.getState().iniciar(crearSesion());
     useSesion.getState().cerrar('manual');
     expect(useSesion.getState().sesion).toBeNull();
+    expect(useSesion.getState().ultimaActividad).toBeNull();
     expect(useSesion.getState().motivoCierre).toBe('manual');
     expect(usePreferencias.getState().ultimoConjuntoSlug).toBe('alamos');
   });
 
-  it('cambiarConjunto con slug propio cambia y registra actividad', () => {
+  it('salir limpia el store al instante y llama a authService.salir', () => {
+    const salir = vi.spyOn(authService, 'salir').mockResolvedValue();
     useSesion.getState().iniciar(crearSesion());
-    vi.setSystemTime(AHORA + 5000);
-    expect(useSesion.getState().cambiarConjunto('robles')).toBe(true);
-    const s = useSesion.getState().sesion!;
-    expect(s.conjuntoActivo.slug).toBe('robles');
-    expect(s.ultimaActividad).toBe(AHORA + 5000);
+    useSesion.getState().salir('manual');
+    expect(useSesion.getState().sesion).toBeNull();
+    expect(useSesion.getState().motivoCierre).toBe('manual');
+    expect(salir).toHaveBeenCalledTimes(1);
   });
 
-  it('cambiarConjunto con slug ajeno devuelve false y no cambia nada', () => {
+  it('salir no falla ni muestra error si authService.salir rechaza', async () => {
+    const salir = vi.spyOn(authService, 'salir').mockRejectedValue(new ErrorAuth('RED'));
     useSesion.getState().iniciar(crearSesion());
-    const antes = useSesion.getState().sesion;
-    expect(useSesion.getState().cambiarConjunto('ajeno')).toBe(false);
-    expect(useSesion.getState().sesion).toEqual(antes);
+    useSesion.getState().salir('inactividad');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(salir).toHaveBeenCalledTimes(1);
+    // Un rechazo sin capturar haría fallar la ejecución de vitest.
+    expect(useSesion.getState().sesion).toBeNull();
+    expect(useSesion.getState().motivoCierre).toBe('inactividad');
   });
 
-  it('cambiarConjunto sin sesión devuelve false', () => {
-    expect(useSesion.getState().cambiarConjunto('alamos')).toBe(false);
+  describe('cambiarConjunto', () => {
+    it('con slug propio llama al servicio con el id y guarda la sesión devuelta', async () => {
+      const base = crearSesion();
+      const devuelta: Sesion = { ...base, conjuntoActivo: base.conjuntos[1] };
+      const cambiar = vi.spyOn(authService, 'cambiarConjunto').mockResolvedValue(devuelta);
+      useSesion.getState().iniciar(base);
+      vi.setSystemTime(AHORA + 5000);
+      await expect(useSesion.getState().cambiarConjunto('robles')).resolves.toBe(true);
+      expect(cambiar).toHaveBeenCalledWith('c2');
+      const s = useSesion.getState().sesion!;
+      expect(s.conjuntoActivo.slug).toBe('robles');
+      expect(s.ultimaActividad).toBe(AHORA + 5000);
+      expect(useSesion.getState().errorCambio).toBeNull();
+    });
+
+    it('con slug ajeno devuelve false y no llama al servicio', async () => {
+      const cambiar = vi.spyOn(authService, 'cambiarConjunto');
+      useSesion.getState().iniciar(crearSesion());
+      const antes = useSesion.getState().sesion;
+      await expect(useSesion.getState().cambiarConjunto('ajeno')).resolves.toBe(false);
+      expect(cambiar).not.toHaveBeenCalled();
+      expect(useSesion.getState().sesion).toEqual(antes);
+    });
+
+    it('sin sesión devuelve false', async () => {
+      await expect(useSesion.getState().cambiarConjunto('alamos')).resolves.toBe(false);
+    });
+
+    it.each(['SIN_MEMBRESIA', 'RED'] as const)('si el servicio rechaza con %s devuelve false y deja el código', async (codigo) => {
+      vi.spyOn(authService, 'cambiarConjunto').mockRejectedValue(new ErrorAuth(codigo));
+      useSesion.getState().iniciar(crearSesion());
+      const antes = useSesion.getState().sesion;
+      await expect(useSesion.getState().cambiarConjunto('robles')).resolves.toBe(false);
+      expect(useSesion.getState().errorCambio).toBe(codigo);
+      expect(useSesion.getState().sesion).toEqual(antes);
+    });
   });
 
   it('registrarActividad actualiza la marca; sin sesión no hace nada', () => {
     useSesion.getState().registrarActividad(123);
     expect(useSesion.getState().sesion).toBeNull();
+    expect(useSesion.getState().ultimaActividad).toBeNull();
     useSesion.getState().iniciar(crearSesion());
     useSesion.getState().registrarActividad(AHORA + 9000);
     expect(useSesion.getState().sesion?.ultimaActividad).toBe(AHORA + 9000);
+    expect(useSesion.getState().ultimaActividad).toBe(AHORA + 9000);
   });
 
-  it('persiste solo sesion y motivoCierre en mailflow.sesion', () => {
+  it('persiste solo ultimaActividad y motivoCierre, sin ningún dato personal', () => {
     useSesion.getState().iniciar(crearSesion());
-    const guardado = JSON.parse(localStorage.getItem('mailflow.sesion')!);
-    expect(Object.keys(guardado.state).sort()).toEqual(['motivoCierre', 'sesion']);
+    const crudo = localStorage.getItem('mailflow.sesion')!;
+    const guardado = JSON.parse(crudo);
+    expect(Object.keys(guardado.state).sort()).toEqual(['motivoCierre', 'ultimaActividad']);
+    expect(guardado.state.ultimaActividad).toBe(AHORA);
+    expect(crudo).not.toMatch(/ana@|demo\.mailflow|Ana|Álamos|alamos/);
   });
 
-  describe('rehidratación', () => {
+  describe('rehidratar', () => {
+    it('con sesión del servidor la deja en el store y pasa a lista', async () => {
+      vi.spyOn(authService, 'sesion').mockResolvedValue(crearSesion(1));
+      useSesion.setState({ estado: 'cargando' });
+      await useSesion.getState().rehidratar();
+      const { sesion, estado, motivoCierre } = useSesion.getState();
+      expect(sesion?.usuario.correo).toBe('ana@demo.mailflow.test');
+      expect(sesion?.ultimaActividad).toBe(AHORA);
+      expect(estado).toBe('lista');
+      expect(motivoCierre).toBeNull();
+    });
+
+    it('con null deja sesion en null y pasa a lista', async () => {
+      vi.spyOn(authService, 'sesion').mockResolvedValue(null);
+      useSesion.setState({ estado: 'cargando' });
+      await useSesion.getState().rehidratar();
+      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().estado).toBe('lista');
+    });
+
+    it('si el servicio lanza, queda sin sesión y en lista', async () => {
+      vi.spyOn(authService, 'sesion').mockRejectedValue(new ErrorAuth('RED'));
+      useSesion.setState({ estado: 'cargando' });
+      await expect(useSesion.getState().rehidratar()).resolves.toBeUndefined();
+      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().estado).toBe('lista');
+    });
+
+    it('null con ultimaActividad vencida (30 min o más) deja motivo inactividad', async () => {
+      vi.spyOn(authService, 'sesion').mockResolvedValue(null);
+      useSesion.setState({ estado: 'cargando', ultimaActividad: AHORA - LIMITE_INACTIVIDAD_MS });
+      await useSesion.getState().rehidratar();
+      expect(useSesion.getState().motivoCierre).toBe('inactividad');
+    });
+
+    it('null con ultimaActividad reciente conserva el motivo persistido', async () => {
+      vi.spyOn(authService, 'sesion').mockResolvedValue(null);
+      useSesion.setState({ estado: 'cargando', ultimaActividad: AHORA - 5 * 60_000, motivoCierre: 'manual' });
+      await useSesion.getState().rehidratar();
+      expect(useSesion.getState().motivoCierre).toBe('manual');
+    });
+  });
+
+  describe('lectura de lo persistido', () => {
     function guardar(state: unknown) {
       localStorage.setItem('mailflow.sesion', JSON.stringify({ state, version: 0 }));
     }
 
-    it('conserva una sesión reciente', async () => {
-      guardar({ sesion: crearSesion(AHORA - 29 * 60_000), motivoCierre: null });
+    it('carga ultimaActividad y motivoCierre válidos', async () => {
+      guardar({ ultimaActividad: AHORA - 1000, motivoCierre: 'inactividad' });
       await useSesion.persist.rehydrate();
-      expect(useSesion.getState().sesion).not.toBeNull();
-    });
-
-    it('descarta una sesión de hace 31 min con motivo inactividad', async () => {
-      guardar({ sesion: crearSesion(AHORA - 31 * 60_000), motivoCierre: null });
-      await useSesion.persist.rehydrate();
-      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().ultimaActividad).toBe(AHORA - 1000);
       expect(useSesion.getState().motivoCierre).toBe('inactividad');
     });
 
-    it('JSON inválido: sin sesión y sin lanzar', async () => {
+    it('JSON inválido: valores vacíos y sin lanzar', async () => {
       localStorage.setItem('mailflow.sesion', '{no es json');
       await expect(useSesion.persist.rehydrate()).resolves.not.toThrow();
-      expect(useSesion.getState().sesion).toBeNull();
-    });
-
-    it('sesión sin usuario: sin sesión', async () => {
-      const sinUsuario: Partial<Sesion> = crearSesion();
-      delete sinUsuario.usuario;
-      guardar({ sesion: sinUsuario, motivoCierre: null });
-      await useSesion.persist.rehydrate();
-      expect(useSesion.getState().sesion).toBeNull();
-    });
-
-    it('sin sesión conserva el motivo de cierre persistido', async () => {
-      guardar({ sesion: null, motivoCierre: 'inactividad' });
-      await useSesion.persist.rehydrate();
-      expect(useSesion.getState().sesion).toBeNull();
-      expect(useSesion.getState().motivoCierre).toBe('inactividad');
-      expect(JSON.parse(localStorage.getItem('mailflow.sesion')!).state.motivoCierre).toBe('inactividad');
-    });
-
-    it('sesión corrupta: sin sesión y sin motivo', async () => {
-      guardar({ sesion: { basura: true }, motivoCierre: 'manual' });
-      await useSesion.persist.rehydrate();
-      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().ultimaActividad).toBeNull();
       expect(useSesion.getState().motivoCierre).toBeNull();
     });
 
-    it.each([
-      ['conjuntos con null', (s: Sesion) => ({ ...s, conjuntos: [null] })],
-      ['usuario vacío', (s: Sesion) => ({ ...s, usuario: {} })],
-      ['rol inválido', (s: Sesion) => ({ ...s, usuario: { ...s.usuario, rol: 'DIOS' } })],
-      [
-        'conjuntoActivo fuera de conjuntos',
-        (s: Sesion) => ({ ...s, conjuntoActivo: { id: 'x', slug: 'ajeno', nombre: 'Ajeno' } }),
-      ],
-      ['conjuntoActivo sin slug', (s: Sesion) => ({ ...s, conjuntoActivo: { id: 'x', nombre: 'A' } })],
-    ])('forma inesperada (%s): sin sesión y sin lanzar', async (_n, deforma) => {
-      guardar({ sesion: deforma(crearSesion()), motivoCierre: null });
-      await expect(useSesion.persist.rehydrate()).resolves.not.toThrow();
-      expect(useSesion.getState().sesion).toBeNull();
+    it('valores corruptos se descartan', async () => {
+      guardar({ ultimaActividad: 'ayer', motivoCierre: 'otro' });
+      await useSesion.persist.rehydrate();
+      expect(useSesion.getState().ultimaActividad).toBeNull();
+      expect(useSesion.getState().motivoCierre).toBeNull();
     });
 
-    it('ultimaActividad no numérica: sin sesión', async () => {
-      guardar({ sesion: { ...crearSesion(), ultimaActividad: 'ayer' }, motivoCierre: null });
+    it('rehidratar desde el almacenamiento no toca la sesión en memoria ni el estado', async () => {
+      useSesion.getState().iniciar(crearSesion());
+      guardar({ ultimaActividad: null, motivoCierre: 'manual' });
       await useSesion.persist.rehydrate();
-      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().sesion).not.toBeNull();
+      expect(useSesion.getState().estado).toBe('lista');
     });
   });
 });

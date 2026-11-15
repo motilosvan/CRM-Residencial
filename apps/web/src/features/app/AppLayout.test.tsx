@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { Conjunto, Rol, Sesion } from '@/types/conjunto';
 
 const listar = vi.fn();
-vi.mock('@/services', () => ({ conjuntosService: { listar: (s?: AbortSignal) => listar(s) } }));
+const salir = vi.fn();
+vi.mock('@/services', () => ({
+  conjuntosService: { listar: (s?: AbortSignal) => listar(s) },
+  authService: { salir: () => salir(), sesion: () => Promise.resolve(null) },
+}));
 
 const seguir = vi.fn();
 const inactividad = { avisoVisible: false, segundosRestantes: 42, seguir };
@@ -46,8 +50,10 @@ beforeEach(() => {
   listar.mockReset();
   listar.mockResolvedValue([uno, dos]);
   seguir.mockReset();
+  salir.mockReset();
+  salir.mockResolvedValue(undefined);
   inactividad.avisoVisible = false;
-  useSesion.setState({ sesion: null, motivoCierre: null });
+  useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null });
   // useIsMobile (shadcn) lee matchMedia; jsdom no lo trae.
   vi.stubGlobal('matchMedia', (q: string) => ({
     matches: false,
@@ -175,6 +181,30 @@ describe('AppLayout', () => {
     await userEvent.click(await screen.findByRole('button', { name: /menú de usuario/i }));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Cerrar sesión' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/login'));
+    expect(salir).toHaveBeenCalledTimes(1);
+  });
+
+  it('«Cerrar sesión» cierra y navega aunque authService.salir falle por red', async () => {
+    salir.mockRejectedValue(new Error('red'));
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    const router = montar('/app/uno/inicio');
+    await userEvent.click(await screen.findByRole('button', { name: /menú de usuario/i }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Cerrar sesión' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/login'));
+    expect(salir).toHaveBeenCalledTimes(1);
+    expect(useSesion.getState().sesion).toBeNull();
+    expect(screen.queryByText(/error|no se pudo/i)).not.toBeInTheDocument();
+  });
+
+  it('«Cerrar sesión» del diálogo de inactividad llama authService.salir aunque falle', async () => {
+    salir.mockRejectedValue(new Error('red'));
+    inactividad.avisoVisible = true;
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    const router = montar('/app/uno/inicio');
+    const dialogo = await screen.findByRole('alertdialog');
+    await userEvent.click(within(dialogo).getByRole('button', { name: 'Cerrar sesión' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/login'));
+    expect(salir).toHaveBeenCalledTimes(1);
   });
 
   it('el diálogo de inactividad aparece con avisoVisible y «Seguir conectado» llama seguir()', async () => {

@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
-import { authService, CODIGO_DEMO } from '@/services';
+import { authService, CODIGO_DEMO, usaMock } from '@/services';
 import { ErrorAuth, type CodigoEnviado } from '@/services/contratos';
 import { usePreferencias } from '@/store/preferencias';
 import { useSesion } from '@/store/sesion';
@@ -233,7 +233,7 @@ export function PasoCodigo({ conjunto, correo, envio: envioInicial, desbloqueoEn
         )}
       </div>
 
-      {import.meta.env.DEV && (
+      {usaMock && (
         <p className="rounded-md border border-dashed px-3 py-2 text-center text-xs text-muted-foreground">
           Código de demostración: {CODIGO_DEMO}
         </p>

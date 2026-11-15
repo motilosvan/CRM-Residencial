@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { authService } from '@/services';
+import { ErrorAuth, type CodigoErrorAuth } from '@/services/contratos';
 import type { Sesion } from '@/types/conjunto';
 
 export const LIMITE_INACTIVIDAD_MS = 30 * 60_000;
 export const AVISO_MS = 60_000;
+export const CLAVE_SESION = 'mailflow.sesion';
 
 export type MotivoCierre = 'manual' | 'inactividad';
 
@@ -20,80 +23,145 @@ export function estadoInactividad(ultimaActividad: number, ahora: number): Estad
   return { vencida, avisar: !vencida && msRestantes <= AVISO_MS, msRestantes };
 }
 
+export type EstadoSesion = 'cargando' | 'lista';
+
 interface SesionState {
+  /** La sesión vive en una cookie httpOnly del servidor; aquí solo hay una copia en memoria. */
   sesion: Sesion | null;
+  /** 'cargando' hasta que `rehidratar()` termina (con o sin sesión). */
+  estado: EstadoSesion;
+  /** Única marca persistida (con `motivoCierre`): ningún dato personal llega a localStorage. */
+  ultimaActividad: number | null;
   motivoCierre: MotivoCierre | null;
+  /** Último rechazo de `cambiarConjunto`; la guarda decide entre 403 y reintento. */
+  errorCambio: CodigoErrorAuth | null;
   iniciar(s: Sesion): void;
+  rehidratar(): Promise<void>;
+  /** Limpia el store (sin avisar al servidor). */
   cerrar(m: MotivoCierre): void;
-  cambiarConjunto(slug: string): boolean;
+  /** Limpia el store al instante y avisa al servidor sin bloquear ni mostrar errores. */
+  salir(m: MotivoCierre): void;
+  cambiarConjunto(slug: string): Promise<boolean>;
   registrarActividad(ahora?: number): void;
+  /** Reconcilia con lo que escribió otra pestaña en localStorage. */
+  sincronizar(): void;
+}
+
+interface Persistido {
+  ultimaActividad: number | null;
+  motivoCierre: MotivoCierre | null;
 }
 
 function esObjeto(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
 
-function esTexto(v: unknown): v is string {
-  return typeof v === 'string';
-}
-
-function esConjuntoValido(v: unknown): boolean {
-  return esObjeto(v) && esTexto(v.id) && esTexto(v.slug) && esTexto(v.nombre);
-}
-
 function esMotivo(v: unknown): v is MotivoCierre {
   return v === 'manual' || v === 'inactividad';
 }
 
-function esSesionValida(v: unknown): v is Sesion {
-  if (!esObjeto(v)) return false;
-  const u = v.usuario;
-  if (!esObjeto(u) || !esTexto(u.id) || !esTexto(u.nombre) || !esTexto(u.correo)) return false;
-  if (u.rol !== 'ADMIN' && u.rol !== 'SOPORTE') return false;
-  if (!esConjuntoValido(v.conjuntoActivo) || !Array.isArray(v.conjuntos)) return false;
-  if (!v.conjuntos.every(esConjuntoValido)) return false;
-  const activo = v.conjuntoActivo as { slug: string };
-  if (!v.conjuntos.some((c) => (c as { slug: string }).slug === activo.slug)) return false;
-  return typeof v.ultimaActividad === 'number' && Number.isFinite(v.ultimaActividad);
+function validar(v: unknown): Persistido {
+  const p = esObjeto(v) ? v : {};
+  return {
+    ultimaActividad:
+      typeof p.ultimaActividad === 'number' && Number.isFinite(p.ultimaActividad) ? p.ultimaActividad : null,
+    motivoCierre: esMotivo(p.motivoCierre) ? p.motivoCierre : null,
+  };
+}
+
+/** Lee lo persistido tal cual está ahora en localStorage; cualquier fallo equivale a "vacío". */
+function leerPersistido(): Persistido {
+  try {
+    const crudo = localStorage.getItem(CLAVE_SESION);
+    const json: unknown = crudo ? JSON.parse(crudo) : null;
+    return validar(esObjeto(json) ? json.state : null);
+  } catch {
+    return validar(null);
+  }
 }
 
 export const useSesion = create<SesionState>()(
   persist(
     (set, get) => ({
       sesion: null,
+      estado: 'cargando',
+      ultimaActividad: null,
       motivoCierre: null,
-      iniciar: (s) => set({ sesion: { ...s, ultimaActividad: Date.now() }, motivoCierre: null }),
-      cerrar: (m) => set({ sesion: null, motivoCierre: m }),
-      cambiarConjunto: (slug) => {
+      errorCambio: null,
+      iniciar: (s) => {
+        const ahora = Date.now();
+        set({ sesion: { ...s, ultimaActividad: ahora }, ultimaActividad: ahora, motivoCierre: null, estado: 'lista' });
+      },
+      rehidratar: async () => {
+        const previa = get().ultimaActividad;
+        let remota: Sesion | null = null;
+        try {
+          remota = await authService.sesion();
+        } catch {
+          remota = null;
+        }
+        const ahora = Date.now();
+        if (remota) {
+          set({ sesion: { ...remota, ultimaActividad: ahora }, ultimaActividad: ahora, motivoCierre: null, estado: 'lista' });
+          return;
+        }
+        const vencida = previa !== null && estadoInactividad(previa, ahora).vencida;
+        set({
+          sesion: null,
+          ultimaActividad: null,
+          motivoCierre: vencida ? 'inactividad' : get().motivoCierre,
+          estado: 'lista',
+        });
+      },
+      cerrar: (m) => set({ sesion: null, ultimaActividad: null, motivoCierre: m }),
+      salir: (m) => {
+        get().cerrar(m);
+        // Sin esperar y sin error visible: el panel ya quedó cerrado en este navegador.
+        try {
+          void authService.salir().catch(() => undefined);
+        } catch {
+          // Un fallo síncrono del servicio tampoco debe romper el cierre.
+        }
+      },
+      cambiarConjunto: async (slug) => {
         const { sesion } = get();
         const destino = sesion?.conjuntos.find((c) => c.slug === slug);
         if (!sesion || !destino) return false;
-        set({ sesion: { ...sesion, conjuntoActivo: destino, ultimaActividad: Date.now() } });
-        return true;
+        set({ errorCambio: null });
+        try {
+          const nueva = await authService.cambiarConjunto(destino.id);
+          const ahora = Date.now();
+          set({ sesion: { ...nueva, ultimaActividad: ahora }, ultimaActividad: ahora });
+          return true;
+        } catch (e) {
+          set({ errorCambio: e instanceof ErrorAuth ? e.codigo : 'RED' });
+          return false;
+        }
       },
       registrarActividad: (ahora = Date.now()) => {
         const { sesion } = get();
         if (!sesion) return;
-        set({ sesion: { ...sesion, ultimaActividad: ahora } });
+        set({ sesion: { ...sesion, ultimaActividad: ahora }, ultimaActividad: ahora });
+      },
+      sincronizar: () => {
+        const p = leerPersistido();
+        const { sesion } = get();
+        if (!sesion) {
+          set({ ultimaActividad: p.ultimaActividad, motivoCierre: p.motivoCierre });
+          return;
+        }
+        if (p.ultimaActividad === null) {
+          // Otra pestaña cerró la sesión: esta cierra localmente con el mismo motivo.
+          set({ sesion: null, ultimaActividad: null, motivoCierre: p.motivoCierre ?? 'manual' });
+        } else if (p.ultimaActividad > sesion.ultimaActividad) {
+          set({ sesion: { ...sesion, ultimaActividad: p.ultimaActividad }, ultimaActividad: p.ultimaActividad });
+        }
       },
     }),
     {
-      name: 'mailflow.sesion',
-      partialize: (s) => ({ sesion: s.sesion, motivoCierre: s.motivoCierre }),
-      merge: (persistido, actual) => {
-        const p = esObjeto(persistido) ? persistido : {};
-        if (p.sesion === null || p.sesion === undefined) {
-          // Sin sesión: se conserva el motivo del cierre (lo necesita el login).
-          return { ...actual, sesion: null, motivoCierre: esMotivo(p.motivoCierre) ? p.motivoCierre : null };
-        }
-        if (!esSesionValida(p.sesion)) {
-          return { ...actual, sesion: null, motivoCierre: null };
-        }
-        if (estadoInactividad(p.sesion.ultimaActividad, Date.now()).vencida) {
-          return { ...actual, sesion: null, motivoCierre: 'inactividad' };
-        }
-        return { ...actual, sesion: p.sesion, motivoCierre: esMotivo(p.motivoCierre) ? p.motivoCierre : null };
-      },
+      name: CLAVE_SESION,
+      partialize: (s): Persistido => ({ ultimaActividad: s.ultimaActividad, motivoCierre: s.motivoCierre }),
+      merge: (persistido, actual) => ({ ...actual, ...validar(persistido) }),
     },
   ),
 );

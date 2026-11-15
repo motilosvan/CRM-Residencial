@@ -4,11 +4,21 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Conjunto, Sesion } from '@/types/conjunto';
+import { ErrorAuth } from '@/services/contratos';
 import { PALETA_MAILFLOW, PALETA_PARQUES, type Paleta } from '@/tema/paletas';
 import { CONJUNTOS_DEMO } from '@/services/mock/datos';
 
 const listar = vi.fn();
-vi.mock('@/services', () => ({ conjuntosService: { listar: (s?: AbortSignal) => listar(s) } }));
+const cambiarConjuntoSrv = vi.fn();
+const salirSrv = vi.fn();
+vi.mock('@/services', () => ({
+  conjuntosService: { listar: (s?: AbortSignal) => listar(s) },
+  authService: {
+    cambiarConjunto: (id: string) => cambiarConjuntoSrv(id),
+    salir: () => salirSrv(),
+    sesion: () => Promise.resolve(null),
+  },
+}));
 const aplicarTema = vi.fn();
 vi.mock('@/tema/aplicarTema', () => ({ aplicarTema: (...a: unknown[]) => aplicarTema(...a) }));
 
@@ -52,7 +62,16 @@ beforeEach(() => {
   listar.mockReset();
   aplicarTema.mockReset();
   listar.mockResolvedValue([propio, otro, ajeno]);
-  useSesion.setState({ sesion: null, motivoCierre: null });
+  cambiarConjuntoSrv.mockReset();
+  salirSrv.mockReset();
+  salirSrv.mockResolvedValue(undefined);
+  // Por defecto el servidor acepta el cambio y devuelve la sesión con ese conjunto activo.
+  cambiarConjuntoSrv.mockImplementation(async (id: string) => {
+    const actual = useSesion.getState().sesion!;
+    const destino = actual.conjuntos.find((c) => c.id === id)!;
+    return { ...actual, conjuntoActivo: destino };
+  });
+  useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null, errorCambio: null });
   usePreferencias.setState({ ultimoConjuntoSlug: null });
 });
 
@@ -64,10 +83,48 @@ describe('GuardaConjunto', () => {
   });
 
   it('sin sesión por inactividad redirige a /login?motivo=inactividad', async () => {
-    useSesion.setState({ sesion: null, motivoCierre: 'inactividad' });
+    useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: 'inactividad' });
     const { router: r } = montar('/app/propio/inicio');
     await waitFor(() => expect(r.state.location.pathname).toBe('/login'));
     expect(r.state.location.search).toBe('?motivo=inactividad');
+  });
+
+  it('mientras el estado es cargando muestra el esqueleto y no redirige a /login', async () => {
+    useSesion.setState({ estado: 'cargando' });
+    const { router: r } = montar('/app/propio/inicio');
+    expect(screen.getByRole('status', { name: /cargando/i })).toBeInTheDocument();
+    await new Promise((res) => setTimeout(res, 20));
+    expect(r.state.location.pathname).toBe('/app/propio/inicio');
+    // Al terminar de rehidratar sin sesión, sí redirige.
+    act(() => useSesion.setState({ estado: 'lista' }));
+    await waitFor(() => expect(r.state.location.pathname).toBe('/login'));
+  });
+
+  it('al terminar de rehidratar con sesión muestra el panel', async () => {
+    useSesion.setState({ estado: 'cargando' });
+    montar('/app/propio/inicio');
+    act(() => useSesion.setState({ sesion: sesionDe(propio, [propio]), estado: 'lista' }));
+    expect(await screen.findByRole('heading', { name: 'Inicio' })).toBeInTheDocument();
+  });
+
+  it('cambio de conjunto rechazado con SIN_MEMBRESIA muestra la página 403', async () => {
+    cambiarConjuntoSrv.mockRejectedValue(new ErrorAuth('SIN_MEMBRESIA'));
+    useSesion.setState({ sesion: sesionDe(propio, [propio, otro]) });
+    montar('/app/otro/inicio');
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+    expect(useSesion.getState().sesion?.conjuntoActivo.slug).toBe('propio');
+  });
+
+  it('cambio de conjunto rechazado por red muestra Reintentar (no 403) y reintenta', async () => {
+    cambiarConjuntoSrv.mockRejectedValueOnce(new ErrorAuth('RED'));
+    useSesion.setState({ sesion: sesionDe(propio, [propio, otro]) });
+    montar('/app/otro/inicio');
+    const boton = await screen.findByRole('button', { name: 'Reintentar' });
+    expect(screen.queryByRole('heading', { name: /sin acceso/i })).not.toBeInTheDocument();
+    await userEvent.click(boton);
+    expect(await screen.findByRole('heading', { name: 'Inicio' })).toBeInTheDocument();
+    expect(useSesion.getState().sesion?.conjuntoActivo.slug).toBe('otro');
+    expect(cambiarConjuntoSrv).toHaveBeenCalledTimes(2);
   });
 
   it('slug inexistente muestra 404 en sitio', async () => {

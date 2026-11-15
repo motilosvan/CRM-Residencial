@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Sesion } from '@/types/conjunto';
 import { LIMITE_INACTIVIDAD_MS, useSesion } from '@/store/sesion';
 import { usePreferencias } from '@/store/preferencias';
-import { TOPE_ESCRITURA_MS, useInactividad } from './useInactividad';
+import { authService } from '@/services';
+import { TOPE_AVISO_SERVIDOR_MS, TOPE_ESCRITURA_MS, useInactividad } from './useInactividad';
 
 const AHORA = new Date('2026-01-10T12:00:00Z').getTime();
 const MIN = 60_000;
@@ -33,7 +34,10 @@ function disparar(tipo: string, objetivo: EventTarget = window) {
 
 /** Simula que otra pestaña escribió `ultimaActividad` en localStorage y avisó con `storage`. */
 function escribirDesdeOtraPestana(sesion: Sesion | null) {
-  const valor = JSON.stringify({ state: { sesion, motivoCierre: sesion ? null : 'manual' }, version: 0 });
+  const valor = JSON.stringify({
+    state: { ultimaActividad: sesion?.ultimaActividad ?? null, motivoCierre: sesion ? null : 'manual' },
+    version: 0,
+  });
   localStorage.setItem('mailflow.sesion', valor);
   act(() => {
     window.dispatchEvent(new StorageEvent('storage', { key: 'mailflow.sesion', newValue: valor }));
@@ -45,15 +49,17 @@ describe('useInactividad', () => {
     vi.useFakeTimers();
     vi.setSystemTime(AHORA);
     localStorage.clear();
-    useSesion.setState({ sesion: null, motivoCierre: null });
+    useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null });
     usePreferencias.setState({ ultimoConjuntoSlug: null });
+    vi.spyOn(authService, 'salir').mockResolvedValue();
+    vi.spyOn(authService, 'sesion').mockResolvedValue(crearSesion());
     useSesion.getState().iniciar(crearSesion());
   });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     localStorage.clear();
-    useSesion.setState({ sesion: null, motivoCierre: null });
+    useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null });
   });
 
   it('sin aviso mientras hay actividad reciente', () => {
@@ -125,7 +131,7 @@ describe('useInactividad', () => {
 
   it('el cierre por inactividad en otra pestaña conserva el motivo aquí y en localStorage', () => {
     renderHook(() => useInactividad());
-    const valor = JSON.stringify({ state: { sesion: null, motivoCierre: 'inactividad' }, version: 0 });
+    const valor = JSON.stringify({ state: { ultimaActividad: null, motivoCierre: 'inactividad' }, version: 0 });
     localStorage.setItem('mailflow.sesion', valor);
     act(() => {
       window.dispatchEvent(new StorageEvent('storage', { key: 'mailflow.sesion', newValue: valor }));
@@ -151,7 +157,7 @@ describe('useInactividad', () => {
   });
 
   it('sin sesión no hace nada: ni intervalo ni listeners', () => {
-    useSesion.setState({ sesion: null, motivoCierre: null });
+    useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null });
     const agregarV = vi.spyOn(window, 'addEventListener');
     const agregarD = vi.spyOn(document, 'addEventListener');
     const { result, unmount } = renderHook(() => useInactividad());
@@ -190,5 +196,62 @@ describe('useInactividad', () => {
     avanzar(LIMITE_INACTIVIDAD_MS);
     expect(useSesion.getState().sesion).toEqual(antes);
     expect(useSesion.getState().motivoCierre).toBeNull();
+  });
+
+  describe('aviso al servidor', () => {
+    it('con actividad llama a authService.sesion como mucho una vez cada 5 min', () => {
+      const sesion = vi.spyOn(authService, 'sesion').mockResolvedValue(crearSesion());
+      renderHook(() => useInactividad());
+      avanzar(1000);
+      disparar('pointermove');
+      expect(sesion).not.toHaveBeenCalled();
+      avanzar(TOPE_AVISO_SERVIDOR_MS);
+      disparar('keydown');
+      expect(sesion).toHaveBeenCalledTimes(1);
+      avanzar(20_000);
+      disparar('pointermove');
+      avanzar(60_000);
+      disparar('scroll');
+      expect(sesion).toHaveBeenCalledTimes(1);
+      avanzar(TOPE_AVISO_SERVIDOR_MS);
+      disparar('keydown');
+      expect(sesion).toHaveBeenCalledTimes(2);
+    });
+
+    it('sin actividad no llama a authService.sesion', () => {
+      const sesion = vi.spyOn(authService, 'sesion').mockResolvedValue(crearSesion());
+      renderHook(() => useInactividad());
+      avanzar(20 * MIN);
+      expect(sesion).not.toHaveBeenCalled();
+    });
+
+    it('si el servidor responde null cierra con motivo inactividad', async () => {
+      vi.spyOn(authService, 'sesion').mockResolvedValue(null);
+      renderHook(() => useInactividad());
+      avanzar(TOPE_AVISO_SERVIDOR_MS);
+      disparar('pointermove');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().motivoCierre).toBe('inactividad');
+    });
+
+    it('si el servidor falla por red, la sesión local sigue abierta', async () => {
+      vi.spyOn(authService, 'sesion').mockRejectedValue(new Error('red'));
+      renderHook(() => useInactividad());
+      avanzar(TOPE_AVISO_SERVIDOR_MS);
+      disparar('pointermove');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(useSesion.getState().sesion).not.toBeNull();
+    });
+  });
+
+  it('al vencer por inactividad local avisa también al servidor con salir', () => {
+    renderHook(() => useInactividad());
+    avanzar(LIMITE_INACTIVIDAD_MS);
+    expect(authService.salir).toHaveBeenCalledTimes(1);
   });
 });

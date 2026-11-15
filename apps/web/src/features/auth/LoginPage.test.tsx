@@ -15,7 +15,11 @@ const solicitarCodigo = vi.fn((p: Parameters<AuthService['solicitarCodigo']>[0])
 const verificarCodigo = vi.fn((p: Parameters<AuthService['verificarCodigo']>[0]) => authReal.verificarCodigo(p));
 const listar = vi.fn((s?: AbortSignal) => conjuntosReal.listar(s));
 
+let usaMockValor = true;
 vi.mock('@/services', async () => ({
+  get usaMock() {
+    return usaMockValor;
+  },
   CODIGO_DEMO: (await import('@/services/mock/datos')).CODIGO_DEMO,
   authService: {
     solicitarCodigo: (p: Parameters<AuthService['solicitarCodigo']>[0]) => solicitarCodigo(p),
@@ -45,7 +49,7 @@ beforeEach(() => {
   solicitarCodigo.mockClear();
   verificarCodigo.mockClear();
   listar.mockClear();
-  useSesion.setState({ sesion: null, motivoCierre: null });
+  useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null });
   usePreferencias.setState({ ultimoConjuntoSlug: null });
 });
 
@@ -242,21 +246,20 @@ describe('LoginPage · paso 2', () => {
     await waitFor(() => expect(campoCodigo()).toHaveFocus());
   });
 
-  it('muestra el código de demostración en desarrollo', async () => {
+  it('muestra el código de demostración con servicios simulados (usaMock)', async () => {
     const { user } = montar();
     await pasarAlPaso2(user);
-    expect(import.meta.env.DEV).toBe(true);
     expect(screen.getByText(`Código de demostración: ${CODIGO_DEMO}`)).toBeInTheDocument();
   });
 
-  it('no muestra el código de demostración fuera de desarrollo', async () => {
-    vi.stubEnv('DEV', false);
+  it('no muestra el código de demostración con la API real (usaMock falso)', async () => {
+    usaMockValor = false;
     try {
       const { user } = montar();
       await pasarAlPaso2(user);
       expect(screen.queryByText(/código de demostración/i)).not.toBeInTheDocument();
     } finally {
-      vi.unstubAllEnvs();
+      usaMockValor = true;
     }
   });
 });

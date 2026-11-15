@@ -17,7 +17,7 @@ interface Props {
 }
 
 export default function DialogoInactividad({ abierto, segundos, alSeguir }: Props) {
-  const cerrar = useSesion((s) => s.cerrar);
+  const salir = useSesion((s) => s.salir);
   return (
     <AlertDialog open={abierto}>
       <AlertDialogContent>
@@ -28,7 +28,7 @@ export default function DialogoInactividad({ abierto, segundos, alSeguir }: Prop
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => cerrar('manual')}>Cerrar sesión</AlertDialogCancel>
+          <AlertDialogCancel onClick={() => salir('manual')}>Cerrar sesión</AlertDialogCancel>
           <AlertDialogAction onClick={alSeguir}>Seguir conectado</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
