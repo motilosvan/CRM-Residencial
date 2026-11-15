@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CONJ_SQL, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, idConjuntoInicial, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { crearPool } from '../db/pool.js';
 import { ingestarCorreo } from '../modules/ingesta.js';
 import { construirApp } from './app.js';
 
 let db: TestDb;
 let app: FastifyInstance;
+let inicial: number;
 const errores: string[] = [];
 const HOST = '127.0.0.1:3000';
 
@@ -18,7 +19,8 @@ beforeAll(async () => {
     checkpoint: { cuenta: 'buzon@gmail.com/INBOX', uidValidity: 3, uid: 10 },
   });
   await ingestarCorreo(db.pool, { messageId: '<http-2@mail>', remitente: 'otro@mail.com', asunto: 'Paz y salvo', cuerpo: '' });
-  app = construirApp({ pool: db.pool, hostsPermitidos: new Set([HOST]), registrarError: (d) => errores.push(d) });
+  inicial = await idConjuntoInicial(db);
+  app = construirApp({ pool: db.pool, idConjunto: inicial, hostsPermitidos: new Set([HOST]), registrarError: (d) => errores.push(d) });
 });
 afterAll(async () => {
   await app.close();
@@ -77,7 +79,7 @@ describe('API · defensas', () => {
   it('BD inalcanzable ⇒ 500 genérico y el registro lleva solo tipo y código', async () => {
     const cerrado = await crearPool(db.config, { max: 1 });
     await cerrado.close();
-    const roto = construirApp({ pool: cerrado, hostsPermitidos: new Set([HOST]), registrarError: (d) => errores.push(d) });
+    const roto = construirApp({ pool: cerrado, idConjunto: inicial, hostsPermitidos: new Set([HOST]), registrarError: (d) => errores.push(d) });
     const r = await roto.inject({ method: 'GET', url: '/api/correos', headers: { host: HOST } });
     await roto.close();
     expect(r.statusCode).toBe(500);

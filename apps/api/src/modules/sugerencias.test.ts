@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { CONJ_SQL, crearUsuario, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, crearUsuario, idConjuntoInicial, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { ValidationError } from '../errors.js';
 import { asignar } from './asignaciones.js';
 import { detalleCorreo, listarCorreos, solicitudesParaSugerir } from './consultas.js';
@@ -7,10 +7,12 @@ import { ingestarCorreo } from './ingesta.js';
 import { registrarFalloSugerencia, registrarSugerencia } from './sugerencias.js';
 
 let db: TestDb;
+let inicial: number;
 let n = 0;
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_sug');
+  inicial = await idConjuntoInicial(db);
   await db.q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
 });
 afterAll(async () => db.close());
@@ -160,10 +162,10 @@ describe('Buzón con sugerencias', () => {
   it('detalleCorreo trae el cuerpo enmascarado y la sugerencia; listarCorreos, su estado y categoría', async () => {
     const id = await nuevaSolicitud('Gotera', 'Soy Ana Pérez, mi celular es 310 555 1234');
     await registrarSugerencia(db.pool, sugerencia(id));
-    const { correos } = await listarCorreos(db.pool, { q: 'Gotera' });
+    const { correos } = await listarCorreos(db.pool, inicial, { q: 'Gotera' });
     expect(correos[0]).toMatchObject({ sugerenciaEstado: 'LISTA', sugerenciaCategoria: 'MANTENIMIENTO' });
 
-    const d = await detalleCorreo(db.pool, correos[0]!.id);
+    const d = await detalleCorreo(db.pool, inicial, correos[0]!.id);
     expect(d.cuerpo).toContain('310 555 1234'); // el original no se altera
     expect(d.cuerpoEnmascarado).toBe('Soy [NOMBRE_PROTEGIDO], mi celular es [TEL_PROTEGIDO]');
     expect(d.sugerencia).toMatchObject({ estado: 'LISTA', categoria: 'MANTENIMIENTO', prioridad: 'MEDIA', modelo: base.modelo });
@@ -171,8 +173,8 @@ describe('Buzón con sugerencias', () => {
 
   it('sin sugerencia, los campos quedan en null', async () => {
     await nuevaSolicitud('Sin sugerencia');
-    const { correos } = await listarCorreos(db.pool, { q: 'Sin sugerencia' });
+    const { correos } = await listarCorreos(db.pool, inicial, { q: 'Sin sugerencia' });
     expect(correos[0]).toMatchObject({ sugerenciaEstado: null, sugerenciaCategoria: null });
-    expect((await detalleCorreo(db.pool, correos[0]!.id)).sugerencia).toBeNull();
+    expect((await detalleCorreo(db.pool, inicial, correos[0]!.id)).sugerencia).toBeNull();
   });
 });

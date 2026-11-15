@@ -11,6 +11,11 @@ import { detalleCorreo, estadoGateway, listarCorreos } from '../modules/consulta
 
 export interface OpcionesApp {
   pool: sql.ConnectionPool;
+  /**
+   * Conjunto cuyo buzón sirven las rutas. Provisional: hoy se resuelve una vez al arrancar (conjunto
+   * inicial); con el login vendrá de la sesión de cada petición.
+   */
+  idConjunto: number;
   /** Valores aceptados en la cabecera Host (defensa contra DNS rebinding). */
   hostsPermitidos: ReadonlySet<string>;
   /** Para errores 500: recibe solo tipo y código, nunca el mensaje (puede traer datos personales). */
@@ -29,7 +34,7 @@ function numero(v: unknown): number | undefined {
   return v === undefined || v === '' ? undefined : Number(v);
 }
 
-export function construirApp({ pool, hostsPermitidos, registrarError = console.error }: OpcionesApp): FastifyInstance {
+export function construirApp({ pool, idConjunto, hostsPermitidos, registrarError = console.error }: OpcionesApp): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
 
   app.addHook('onRequest', async (req, reply) => {
@@ -43,16 +48,16 @@ export function construirApp({ pool, hostsPermitidos, registrarError = console.e
   /** Buzón unificado: todos los correos recibidos, más recientes primero. ?q=&limite=&desplazamiento= */
   app.get('/api/correos', async (req) => {
     const q = req.query as Record<string, unknown>;
-    return listarCorreos(pool, {
+    return listarCorreos(pool, idConjunto, {
       q: q.q === '' ? undefined : (q.q as string | undefined),
       limite: numero(q.limite),
       desplazamiento: numero(q.desplazamiento),
     });
   });
 
-  app.get('/api/correos/:id', async (req) => detalleCorreo(pool, Number((req.params as { id: string }).id)));
+  app.get('/api/correos/:id', async (req) => detalleCorreo(pool, idConjunto, Number((req.params as { id: string }).id)));
 
-  app.get('/api/gateway/estado', async () => estadoGateway(pool));
+  app.get('/api/gateway/estado', async () => estadoGateway(pool, idConjunto));
 
   app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Ruta no encontrada' }));
 

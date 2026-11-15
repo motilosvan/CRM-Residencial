@@ -6,6 +6,7 @@
 import { dbConfigFromEnv } from './config.js';
 import { crearPool } from './db/pool.js';
 import { construirApp } from './http/app.js';
+import { idConjuntoPorSlug, SLUG_CONJUNTO_INICIAL } from './modules/conjuntos.js';
 
 const PORT = Number(process.env.API_PORT ?? 3000);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
@@ -15,7 +16,9 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
 
 const db = dbConfigFromEnv();
 const pool = await crearPool(db);
-const app = construirApp({ pool, hostsPermitidos: new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]) });
+// Provisional hasta el login: el buzón que se sirve es el del conjunto inicial, resuelto una vez.
+const idConjunto = await idConjuntoPorSlug(pool, SLUG_CONJUNTO_INICIAL);
+const app = construirApp({ pool, idConjunto, hostsPermitidos: new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]) });
 
 for (const senal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(senal, () => {

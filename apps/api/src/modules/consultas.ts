@@ -143,8 +143,10 @@ const BUZON_FROM = `
     LEFT JOIN SUGERENCIAS_IA sug ON sug.idSolicitud = s.idSolicitud
     LEFT JOIN CATEGORIAS catSug ON catSug.idCategoria = sug.idCategoria`;
 
+/** El buzón siempre se lee dentro de un conjunto: `@idConjunto` va en toda consulta (conteo incluido). */
 const BUZON_FILTRO = `
-   WHERE (@patron IS NULL OR c.asunto LIKE @patron ESCAPE '\\' OR c.remitente LIKE @patron ESCAPE '\\'
+   WHERE c.idConjunto = @idConjunto
+     AND (@patron IS NULL OR c.asunto LIKE @patron ESCAPE '\\' OR c.remitente LIKE @patron ESCAPE '\\'
           OR r.nombre LIKE @patron ESCAPE '\\')`;
 
 export interface FilaCorreo {
@@ -191,11 +193,15 @@ function patronLike(q: string | undefined): string | null {
   return q ? `%${q.replace(/[\\%_[]/g, (m) => `\\${m}`)}%` : null;
 }
 
-/** Bandeja de entrada: correos más recientes primero, con búsqueda y paginación. */
+const IdConjuntoSchema = z.number().int().positive();
+
+/** Bandeja de entrada del conjunto: correos más recientes primero, con búsqueda y paginación. */
 export async function listarCorreos(
   pool: sql.ConnectionPool,
+  idConjunto: number,
   filtro: FiltroCorreos = {},
 ): Promise<{ total: number; correos: (FilaCorreo & { extracto: string })[] }> {
+  const conj = validar(IdConjuntoSchema, idConjunto);
   const f = validar(FiltroCorreosSchema, filtro);
   const patron = patronLike(f.q);
   return withTx(
@@ -204,12 +210,14 @@ export async function listarCorreos(
       const total = (
         await tx
           .request()
+          .input('idConjunto', sql.Int, conj)
           .input('patron', sql.NVarChar(450), patron)
           .query<{ total: number }>(`SELECT COUNT(*) AS total ${BUZON_FROM} ${BUZON_FILTRO}`)
       ).recordset[0]!.total;
       const correos = (
         await tx
           .request()
+          .input('idConjunto', sql.Int, conj)
           .input('patron', sql.NVarChar(450), patron)
           .input('lim', sql.Int, f.limite)
           .input('desp', sql.Int, f.desplazamiento)
@@ -227,12 +235,15 @@ export async function listarCorreos(
 
 /**
  * Un correo completo: el cuerpo, su versión enmascarada (exactamente lo que vería un tercero) y la
- * sugerencia de IA, si existe, todo de la misma foto consistente.
+ * sugerencia de IA, si existe, todo de la misma foto consistente. Un correo de otro conjunto es NotFound
+ * (no se revela que existe); la sugerencia sale de la solicitud de esa misma fila, así que no puede cruzar.
  */
 export async function detalleCorreo(
   pool: sql.ConnectionPool,
+  idConjunto: number,
   idCorreo: number,
 ): Promise<FilaCorreo & { cuerpo: string; cuerpoEnmascarado: string; sugerencia: SugerenciaGuardada | null }> {
+  const conj = validar(IdConjuntoSchema, idConjunto);
   const id = validar(z.number().int().positive(), idCorreo);
   return withTx(
     pool,
@@ -241,8 +252,10 @@ export async function detalleCorreo(
         await tx
           .request()
           .input('id', sql.Int, id)
+          .input('idConjunto', sql.Int, conj)
           .query<FilaCorreo & { cuerpo: string }>(
-            `${BUZON}, COALESCE(c.cuerpo, N'') AS cuerpo ${BUZON_FROM} WHERE c.idCorreo = @id`,
+            `${BUZON}, COALESCE(c.cuerpo, N'') AS cuerpo ${BUZON_FROM}
+              WHERE c.idCorreo = @id AND c.idConjunto = @idConjunto`,
           )
       ).recordset[0];
       if (!fila) throw new NotFound(`El correo ${id} no existe`);
@@ -330,23 +343,26 @@ export async function leerCheckpoint(
   );
 }
 
-/** Estado del gateway para el panel: cuentas leídas, último avance y volumen del buzón. */
-export async function estadoGateway(pool: sql.ConnectionPool) {
+/** Estado del gateway de un conjunto para el panel: sus cuentas leídas, último avance y volumen del buzón. */
+export async function estadoGateway(pool: sql.ConnectionPool, idConjunto: number) {
+  const conj = validar(IdConjuntoSchema, idConjunto);
   return withTx(
     pool,
     async (tx) => {
       const cuentas = (
         await tx
           .request()
+          .input('idConjunto', sql.Int, conj)
           .query<{ cuenta: string; ultimoUid: string; actualizadoEn: Date }>(
-            'SELECT cuenta, ultimoUid, actualizadoEn FROM GATEWAY_CHECKPOINT ORDER BY cuenta',
+            'SELECT cuenta, ultimoUid, actualizadoEn FROM GATEWAY_CHECKPOINT WHERE idConjunto = @idConjunto ORDER BY cuenta',
           )
       ).recordset.map((c) => ({ ...c, ultimoUid: Number(c.ultimoUid) }));
       const buzon = (
         await tx
           .request()
+          .input('idConjunto', sql.Int, conj)
           .query<{ totalCorreos: number; ultimoCorreo: Date | null }>(
-            'SELECT COUNT(*) AS totalCorreos, MAX(fechaRecepcion) AS ultimoCorreo FROM CORREOS',
+            'SELECT COUNT(*) AS totalCorreos, MAX(fechaRecepcion) AS ultimoCorreo FROM CORREOS WHERE idConjunto = @idConjunto',
           )
       ).recordset[0]!;
       return { cuentas, ...buzon };
