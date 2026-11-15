@@ -42,14 +42,22 @@ flowchart LR
 | 4 | Integridad entre conjuntos en SQL Server | 1) `UX_Residentes_correo` pasa a `(idConjunto, correo) WHERE correo IS NOT NULL`. 2) `UX_Correos_messageId` pasa a `(idConjunto, messageId)`. 3) FK compuesta `CORREOS(idConjunto, idResidente) → RESIDENTES(idConjunto, idResidente)` para impedir cruzar residentes entre conjuntos incluso cuando `idResidente` es `NULL`. 4) Trigger en `ASIGNACIONES` que exige que el responsable y quien asigna tengan membresía activa en el conjunto de la solicitud |
 | 5 | Email Gateway e ingesta (`T1`) | Variable `IMAP_CONJUNTO_SLUG` en `.env` (por defecto `parque-central-occidente`) y enlace de `GATEWAY_CHECKPOINT` con `idConjunto`. En `ingestarCorreo`, `idConjunto` es opcional con valor por defecto del conjunto inicial para preservar las 311 pruebas actuales y sumar pruebas multi-conjunto |
 | 6 | Envío del código de 6 dígitos | Interfaz `EnviadorCodigo` con adaptador SMTP (`nodemailer`, compatible con contraseña de aplicación de Gmail) y adaptador local en desarrollo/pruebas cuando no hay SMTP configurado |
-| 7 | Retos OTP en la BD (`RETOS_ACCESO`) | Tabla `dbo.RETOS_ACCESO` por `(idConjunto, correo)` con hash `HMAC-SHA256` del código (nunca en claro), `venceEn` (10 min), `reenvioDisponibleEn` (60 s), `intentosFallidos` (máx. 5), `bloqueadoHasta` (15 min) y `consumidoEn`. Se opera con `UPDLOCK` en `withTx` y sin `DELETE` (compatible con `crm_app`). Registra retos "fantasma" para correos no registrados a fin de garantizar la no-enumeración |
+| 7 | Retos OTP en la BD (`RETOS_ACCESO`) | Tabla `dbo.RETOS_ACCESO` por `(idConjunto, correo)` con hash `HMAC-SHA256` del código (nunca en claro), `venceEn` (10 min), `reenvioDisponibleEn` (60 s), `intentosFallidos` (máx. 5), `bloqueadoHasta` (15 min) y `consumidoEn`. Una **fila por `(idConjunto, correo)`** (índice único): pedir otro código actualiza esa fila con `UPDATE` y no inserta otra, y no reinicia `intentosFallidos`. Se opera con `UPDLOCK` en `withTx` y sin `DELETE` (compatible con `crm_app`). Registra retos "fantasma" (`existeUsuario = 0`) para correos no registrados a fin de garantizar la no-enumeración |
 | 8 | Sesión (`SESIONES` + cookie `httpOnly`) | Cumple el ADR 9: cookie `httpOnly` (`SameSite=Lax`, `Path=/api`) cuyo token aleatorio se guarda hasheado (`SHA-256`) en `dbo.SESIONES(idSesion, tokenHash, idUsuario, idConjuntoActivo, creadaEn, ultimaActividad, revocadaEn)`. Sin `DELETE`: cerrar sesión marca `revocadaEn`. El servidor valida los 30 min de inactividad en cada petición y el frontend rehidrata con `GET /api/auth/sesion` |
 | 9 | Cambio de conjunto activo | `POST /api/auth/conjunto` valida en `dbo.USUARIO_CONJUNTOS` que el usuario tenga membresía activa en el conjunto destino, actualiza `idConjuntoActivo` en `dbo.SESIONES` y devuelve la `Sesion` con el rol de ese conjunto, sin pedir nuevo OTP |
 | 10 | Semilla de conjunto y usuarios | La migración `0007` inserta **Parque Central de Occidente**. Al arrancar la API, si `ADMIN_INICIAL_CORREO` está definido en `.env`, asegura ese usuario como `ADMIN` del conjunto (sin commitear correos personales); en modo desarrollo asegura también `admin@demo.mailflow.test` y `soporte@demo.mailflow.test` |
 | 11 | Protección de rutas actuales | Desde B1, `/api/correos`, `/api/correos/:id` y `/api/gateway/estado` exigen sesión válida (`401` sin cookie o vencida por inactividad) y filtran por el `idConjuntoActivo` de la sesión (`404` si un correo pertenece a otro conjunto). Quedan públicos `/api/salud`, `GET /api/conjuntos`, `POST /api/auth/codigo` y `POST /api/auth/verificar` |
 | 12 | Conexión en `apps/web` | Se implementan `conjuntosHttp` y `authHttp` contra `/api/*` como servicios predeterminados en `apps/web/src/services/index.ts`. Los mocks se conservan para las pruebas unitarias de Vitest y cuando `VITE_USAR_MOCK=1` |
 
+### Decisiones confirmadas (usuario, 2026-11-14)
+
+1. **Sin `DEFAULT` de `idConjunto` en la BD.** Olvidar el conjunto falla. Solo `ingestarCorreo` conserva un valor por defecto (decisión 5).
+2. **Manda `USUARIO_CONJUNTOS.rol`.** La sesión y el trigger de `ASIGNACIONES` usan la membresía. `USUARIOS.rol` queda heredada; sus lectores migran en B2.
+3. **Un reto por `(idConjunto, correo)`** (precisa la decisión 7). Sin límite por IP en B1: es requisito previo a exponer la API fuera de `127.0.0.1`.
+
 ## Esquema SQL de la migración `0007_conjuntos_y_acceso.sql` (borrador)
+
+La migración aplicada es `db/migrations/0007_conjuntos_y_acceso.sql`; añade CHECK, índices y el trigger que este borrador no detalla. El bloque se conserva como referencia.
 
 ```sql
 CREATE TABLE dbo.CONJUNTOS (

@@ -114,6 +114,8 @@ Decisiones que afectan a las semanas siguientes:
 
 ## Semana 4 — API y autenticación  (hito M4)
 
+**Estado (B1): parcial.** Acceso y sesión hechos, con un cambio frente a S4-01: no hay login con contraseña ni argon2. La entrada es un código de un solo uso por correo (`POST /api/auth/codigo` y `/verificar`) con sesión en cookie `httpOnly` y vencimiento por inactividad de 30 min. Quedan protegidas `/api/correos*` y `/api/gateway/estado`. Pendiente: límite de peticiones por IP (requisito antes de exponer la API fuera de `127.0.0.1`), S4-02 y S4-03 (B2). Detalle en `docs/mailflow-backend-entrevista.md`.
+
 | ID | Tarea | Agente | Aceptación |
 |---|---|---|---|
 | S4-01 | Login con argon2, sesión por cookie `httpOnly`, rate limit | `tx-engineer` | Tests 401/403 |
