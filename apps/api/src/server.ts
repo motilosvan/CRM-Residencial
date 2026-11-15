@@ -3,10 +3,11 @@
  * DB_NAME, la misma BD donde escribe el gateway. Requiere la BD migrada (`npm run db:migrate`).
  * Solo escucha en 127.0.0.1.
  */
-import { dbConfigFromEnv } from './config.js';
+import { accesoConfigFromEnv, dbConfigFromEnv, type AccesoConfig } from './config.js';
 import { crearPool } from './db/pool.js';
 import { construirApp } from './http/app.js';
-import { EnviadorLocal } from './modules/enviador.js';
+import { EnviadorLocal, EnviadorSmtp } from './modules/enviador.js';
+import { asegurarUsuariosIniciales } from './modules/semilla.js';
 
 const PORT = Number(process.env.API_PORT ?? 3000);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
@@ -14,23 +15,26 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
   process.exit(1);
 }
 
-const AUTH_SECRETO = process.env.AUTH_SECRETO ?? '';
-if (AUTH_SECRETO.length < 32) {
-  console.error('AUTH_SECRETO es obligatorio y debe tener al menos 32 caracteres');
+let acceso: AccesoConfig;
+try {
+  acceso = accesoConfigFromEnv();
+} catch (e) {
+  console.error(e instanceof Error ? e.message : 'Configuración de acceso inválida');
   process.exit(1);
 }
 
 const db = dbConfigFromEnv();
 const pool = await crearPool(db);
-// Provisional hasta la Tarea 7 (config real: AUTH_SECRETO, SMTP, WEB_ORIGENES, COOKIE_SEGURA): enviador local y valores fijos de desarrollo.
+await asegurarUsuariosIniciales(pool, { adminCorreo: acceso.adminInicialCorreo, demo: acceso.desarrollo });
+if (!acceso.smtp) console.warn('SMTP_HOST sin configurar: los códigos de acceso se escriben en esta consola (solo desarrollo)');
 const app = construirApp({
   pool,
   hostsPermitidos: new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]),
   acceso: {
-    secreto: AUTH_SECRETO,
-    enviador: new EnviadorLocal(),
-    cookieSegura: false,
-    origenesPermitidos: new Set(['http://localhost:5173', 'http://127.0.0.1:5173']),
+    secreto: acceso.secreto,
+    enviador: acceso.smtp ? new EnviadorSmtp(acceso.smtp) : new EnviadorLocal(),
+    cookieSegura: acceso.cookieSegura,
+    origenesPermitidos: acceso.origenes,
   },
 });
 
