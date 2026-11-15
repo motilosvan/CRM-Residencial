@@ -21,6 +21,12 @@ export interface AuthService {
   solicitarCodigo(p: SolicitudCodigo): Promise<CodigoEnviado>;
   /** POST /auth/verificar */
   verificarCodigo(p: SolicitudCodigo & { codigo: string }): Promise<Sesion>;
+  /** GET /auth/sesion. `null` si no hay sesión vigente (401). */
+  sesion(): Promise<Sesion | null>;
+  /** POST /auth/conjunto */
+  cambiarConjunto(conjuntoId: string): Promise<Sesion>;
+  /** POST /auth/salir. Nunca lanza: cerrar sesión siempre "funciona" en el cliente. */
+  salir(): Promise<void>;
 }
 
 export type CodigoErrorAuth =
@@ -28,6 +34,7 @@ export type CodigoErrorAuth =
   | 'CODIGO_VENCIDO'
   | 'BLOQUEADO'
   | 'REENVIO_PRONTO'
+  | 'SIN_MEMBRESIA'
   | 'RED';
 
 /** Error de acceso. Los fallos de red (también en `ConjuntosService`) usan el código 'RED'. */

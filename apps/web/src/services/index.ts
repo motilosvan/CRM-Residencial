@@ -1,4 +1,6 @@
 import type { AuthService, ConjuntosService } from './contratos';
+import { crearAuthHttp } from './http/authHttp';
+import { crearConjuntosHttp } from './http/conjuntosHttp';
 import { crearAuthMock } from './mock/authMock';
 import { crearConjuntosMock } from './mock/conjuntosMock';
 import type { OpcionesMock } from './mock/tipos';
@@ -17,5 +19,8 @@ const opciones: OpcionesMock = {
 
 export { CODIGO_DEMO } from './mock/datos';
 
-export const conjuntosService: ConjuntosService = crearConjuntosMock(opciones);
-export const authService: AuthService = crearAuthMock(opciones);
+/** Servicios simulados en pruebas o con `VITE_USAR_MOCK=1`; si no, la API real por `/api`. */
+export const usaMock = import.meta.env.MODE === 'test' || import.meta.env.VITE_USAR_MOCK === '1';
+
+export const conjuntosService: ConjuntosService = usaMock ? crearConjuntosMock(opciones) : crearConjuntosHttp();
+export const authService: AuthService = usaMock ? crearAuthMock(opciones) : crearAuthHttp();

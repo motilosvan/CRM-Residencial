@@ -4,7 +4,7 @@ import type { Conjunto, Usuario } from '@/types/conjunto';
 export const CODIGO_DEMO = '123456';
 
 export const CONJUNTOS_DEMO: Conjunto[] = [
-  { id: 'cj-parques', slug: 'parques-occidente', nombre: 'Parques del Occidente', paleta: PALETA_PARQUES },
+  { id: 'cj-parques', slug: 'parque-central-occidente', nombre: 'Parque Central de Occidente', paleta: PALETA_PARQUES },
   { id: 'cj-nogal', slug: 'altos-del-nogal', nombre: 'Altos del Nogal' },
   {
     id: 'cj-miradores',

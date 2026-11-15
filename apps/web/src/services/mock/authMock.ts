@@ -31,6 +31,8 @@ const normalizar = (correo: string) => correo.trim().toLowerCase();
 export function crearAuthMock(o: OpcionesMock = {}): AuthService {
   const ahora = o.ahora ?? Date.now;
   const estados = new Map<string, Estado>();
+  let sesionActual: Sesion | null = null;
+  const copia = (s: Sesion): Sesion => structuredClone(s);
 
   const estadoDe = (p: SolicitudCodigo): Estado => {
     const k = clave(p.conjuntoId, normalizar(p.correo));
@@ -82,12 +84,13 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
         e.activo = false;
         e.fallidos = 0;
         const { conjuntoIds, ...datos } = usuario;
-        return {
+        sesionActual = {
           usuario: datos,
           conjuntoActivo: { ...activo },
           conjuntos: CONJUNTOS_DEMO.filter((c) => conjuntoIds.includes(c.id)).map((c) => ({ ...c })),
           ultimaActividad: ahora(),
         };
+        return copia(sesionActual);
       }
 
       e.fallidos += 1;
@@ -97,6 +100,27 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
         throw bloqueado(e);
       }
       throw new ErrorAuth('CODIGO_INCORRECTO', { intentosRestantes: MAX_INTENTOS - e.fallidos });
+    },
+
+    async sesion(): Promise<Sesion | null> {
+      await esperar(o);
+      fallaRed(o);
+      return sesionActual ? copia(sesionActual) : null;
+    },
+
+    async cambiarConjunto(conjuntoId): Promise<Sesion> {
+      await esperar(o);
+      fallaRed(o);
+      // Sin sesión el servidor responde 401, que el cliente trata como 'RED'.
+      if (!sesionActual) throw new ErrorAuth('RED');
+      const nuevo = sesionActual.conjuntos.find((c) => c.id === conjuntoId);
+      if (!nuevo) throw new ErrorAuth('SIN_MEMBRESIA');
+      sesionActual = { ...sesionActual, conjuntoActivo: { ...nuevo }, ultimaActividad: ahora() };
+      return copia(sesionActual);
+    },
+
+    async salir(): Promise<void> {
+      sesionActual = null;
     },
   };
 }

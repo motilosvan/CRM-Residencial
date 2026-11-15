@@ -30,7 +30,7 @@ describe('acceso por código', () => {
     const { auth, ahora } = preparar();
     await auth.solicitarCodigo(pedido(ADMIN));
     const s = await auth.verificarCodigo({ ...pedido(ADMIN), codigo: CODIGO_DEMO });
-    expect(s.conjuntoActivo.slug).toBe('parques-occidente');
+    expect(s.conjuntoActivo.slug).toBe('parque-central-occidente');
     expect(s.conjuntos).toHaveLength(2);
     expect(s.usuario.rol).toBe('ADMIN');
     expect(s.ultimaActividad).toBe(ahora());
@@ -325,7 +325,7 @@ describe('listado de conjuntos', () => {
     const lista = await crearConjuntosMock({ latenciaMs: [0, 0] }).listar();
     expect(lista).toHaveLength(3);
     expect(lista.some((c) => !c.paleta && !c.logoUrl)).toBe(true);
-    expect(lista.find((c) => c.slug === 'parques-occidente')?.paleta?.primario).toBe('#355E3B');
+    expect(lista.find((c) => c.slug === 'parque-central-occidente')?.paleta?.primario).toBe('#355E3B');
   });
 
   it('sinConjuntos: true resuelve []', async () => {
@@ -342,5 +342,42 @@ describe('listado de conjuntos', () => {
     const p = crearConjuntosMock({ latenciaMs: [50, 50] }).listar(c.signal);
     c.abort();
     await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('sesión, cambio de conjunto y salida', () => {
+  async function entrar(auth: ReturnType<typeof preparar>['auth'], correo = ADMIN) {
+    await auth.solicitarCodigo(pedido(correo));
+    return auth.verificarCodigo({ ...pedido(correo), codigo: CODIGO_DEMO });
+  }
+
+  it('sesion() es null sin acceso y devuelve la última sesión verificada', async () => {
+    const { auth } = preparar();
+    expect(await auth.sesion()).toBeNull();
+    const s = await entrar(auth);
+    expect(await auth.sesion()).toEqual(s);
+  });
+
+  it('salir() borra la sesión', async () => {
+    const { auth } = preparar();
+    await entrar(auth);
+    await auth.salir();
+    expect(await auth.sesion()).toBeNull();
+  });
+
+  it('cambiarConjunto cambia el activo y actualiza la sesión', async () => {
+    const { auth } = preparar();
+    await entrar(auth);
+    const s = await auth.cambiarConjunto('cj-nogal');
+    expect(s.conjuntoActivo.id).toBe('cj-nogal');
+    expect((await auth.sesion())?.conjuntoActivo.id).toBe('cj-nogal');
+  });
+
+  it('cambiarConjunto exige pertenencia (SIN_MEMBRESIA) y sesión', async () => {
+    const { auth } = preparar();
+    await expect(auth.cambiarConjunto('cj-nogal')).rejects.toMatchObject({ codigo: 'RED' });
+    await entrar(auth, SOPORTE);
+    const e = await error(auth.cambiarConjunto('cj-nogal'));
+    expect(e.codigo).toBe('SIN_MEMBRESIA');
   });
 });

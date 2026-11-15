@@ -74,7 +74,7 @@ async function elegirConjunto(user: Usuario, nombre: string) {
 }
 
 async function pasarAlPaso2(user: Usuario, correo = CORREO) {
-  await elegirConjunto(user, 'Parques del Occidente');
+  await elegirConjunto(user, 'Parque Central de Occidente');
   await user.type(screen.getByLabelText(/correo/i), correo);
   await user.click(screen.getByRole('button', { name: /enviar código/i }));
   await screen.findByText(NEUTRO);
@@ -142,7 +142,7 @@ describe('LoginPage · paso 1', () => {
   it('un fallo de red al pedir el código avisa y se queda en el paso 1', async () => {
     solicitarCodigo.mockRejectedValueOnce(new ErrorAuth('RED'));
     const { user } = montar();
-    await elegirConjunto(user, 'Parques del Occidente');
+    await elegirConjunto(user, 'Parque Central de Occidente');
     await user.type(screen.getByLabelText(/correo/i), CORREO);
     await user.click(screen.getByRole('button', { name: /enviar código/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/no pudimos enviar el código/i);
@@ -156,11 +156,11 @@ describe('LoginPage · paso 2', () => {
     await pasarAlPaso2(user);
     await user.click(campoCodigo());
     await user.paste(` ${CODIGO_DEMO.slice(0, 3)} ${CODIGO_DEMO.slice(3)} `);
-    await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/app\/parques-occidente/));
+    await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/app\/parque-central-occidente/));
     expect(verificarCodigo).toHaveBeenCalledTimes(1);
     expect(verificarCodigo.mock.calls[0][0].codigo).toBe(CODIGO_DEMO);
     expect(useSesion.getState().sesion?.usuario.correo).toBe(CORREO);
-    expect(usePreferencias.getState().ultimoConjuntoSlug).toBe('parques-occidente');
+    expect(usePreferencias.getState().ultimoConjuntoSlug).toBe('parque-central-occidente');
   });
 
   it('código erróneo muestra los intentos restantes', async () => {
@@ -219,7 +219,7 @@ describe('LoginPage · paso 2', () => {
     await pasarAlPaso2(user);
     await user.click(screen.getByRole('button', { name: /cambiar correo/i }));
     const combo = await screen.findByRole('combobox', { name: /conjunto/i });
-    expect(combo).toHaveTextContent('Parques del Occidente');
+    expect(combo).toHaveTextContent('Parque Central de Occidente');
     expect(screen.getByLabelText(/correo/i)).toHaveValue(CORREO);
   });
 
@@ -359,7 +359,7 @@ describe('LoginPage · foco de revisión (ronda 1)', () => {
       (p) => new Promise((resolver, rechazar) => setTimeout(() => authReal.solicitarCodigo(p).then(resolver, rechazar), 150)),
     );
     const { user } = montar();
-    await elegirConjunto(user, 'Parques del Occidente');
+    await elegirConjunto(user, 'Parque Central de Occidente');
     await user.type(screen.getByLabelText(/correo/i), CORREO);
     await user.dblClick(screen.getByRole('button', { name: /enviar código/i }));
     await screen.findByText(NEUTRO);
@@ -371,7 +371,7 @@ describe('LoginPage · foco de revisión (ronda 1)', () => {
       (p) => new Promise((resolver, rechazar) => setTimeout(() => authReal.solicitarCodigo(p).then(resolver, rechazar), 150)),
     );
     const { user } = montar();
-    await elegirConjunto(user, 'Parques del Occidente');
+    await elegirConjunto(user, 'Parque Central de Occidente');
     await user.type(screen.getByLabelText(/correo/i), `${CORREO}{Enter}{Enter}`);
     await screen.findByText(NEUTRO);
     expect(solicitarCodigo).toHaveBeenCalledTimes(1);
@@ -382,7 +382,7 @@ describe('LoginPage · foco de revisión (ronda 1)', () => {
       (p) => new Promise((resolver, rechazar) => setTimeout(() => authReal.solicitarCodigo(p).then(resolver, rechazar), 150)),
     );
     const { user } = montar();
-    await elegirConjunto(user, 'Parques del Occidente');
+    await elegirConjunto(user, 'Parque Central de Occidente');
     await user.type(screen.getByLabelText(/correo/i), CORREO);
     const form = screen.getByRole('button', { name: /enviar código/i }).closest('form') as HTMLFormElement;
     fireEvent.submit(form);
@@ -458,7 +458,7 @@ describe('LoginPage · ola final', () => {
     });
     useSesion.getState().iniciar(sesion);
     const { router } = montar('/login');
-    await waitFor(() => expect(router.state.location.pathname).toBe('/app/parques-occidente'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/app/parque-central-occidente'));
   });
 
   it('A2: al llegar la hora de desbloqueo se limpia el error y se ofrece pedir un código nuevo', async () => {

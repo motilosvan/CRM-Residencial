@@ -4,14 +4,14 @@ import { AvatarConjunto, iniciales } from './AvatarConjunto';
 
 describe('AvatarConjunto', () => {
   it('calcula iniciales de palabras significativas', () => {
-    expect(iniciales('Parques del Occidente')).toBe('PO');
+    expect(iniciales('Parque Central de Occidente')).toBe('PC');
     expect(iniciales('Altos del Nogal')).toBe('AN');
     expect(iniciales('Torres')).toBe('T');
     expect(iniciales('Conjunto Residencial Los Pinos Norte')).toBe('CR');
   });
   it('sin logo muestra las iniciales', () => {
-    render(<AvatarConjunto conjunto={{ nombre: 'Parques del Occidente' }} />);
-    expect(screen.getByText('PO')).toBeInTheDocument();
+    render(<AvatarConjunto conjunto={{ nombre: 'Parque Central de Occidente' }} />);
+    expect(screen.getByText('PC')).toBeInTheDocument();
   });
   it('iniciales vacías devuelven un signo neutro', () => {
     expect(iniciales('')).toBe('·');
