@@ -10,6 +10,8 @@
      CORREOS(idConjunto, idResidente) para no cruzar residentes entre conjuntos.
    - RETOS_ACCESO (OTP hasheado) y SESIONES (token hasheado): sin DELETE.
    - Trigger: responsable y quien asigna con membresía activa en el conjunto.
+   - Triggers: un correo o un residente no cambia de conjunto y una solicitud
+     no cambia de correo (THROW 50027, 50028, 50029).
    Aplica sobre una BD limpia y sobre una con datos (todo es repetible).
    ===================================================================== */
 
@@ -184,6 +186,13 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_Retos_conjunto_correo'
     CREATE UNIQUE INDEX UX_Retos_conjunto_correo ON dbo.RETOS_ACCESO (idConjunto, correo);
 GO
 
+-- Al quinto fallo el reto se bloquea y no se cuentan más intentos hasta que el bloqueo vence.
+-- Sin CHECK venceEn > creadoEn: venceEn lo calcula la aplicación con su reloj y creadoEn lo pone el
+-- DEFAULT con el reloj de la BD; un desfase (o un reloj inyectado en pruebas) lo violaría.
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Retos_intentos')
+    ALTER TABLE dbo.RETOS_ACCESO WITH CHECK ADD CONSTRAINT CK_Retos_intentos CHECK (intentosFallidos BETWEEN 0 AND 5);
+GO
+
 /* ---------- 7. SESIONES: token aleatorio guardado como SHA-256 ---------- */
 
 IF OBJECT_ID('dbo.SESIONES', 'U') IS NULL
@@ -203,6 +212,14 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Sesiones_idUsuario' AN
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Sesiones_idConjuntoActivo' AND object_id = OBJECT_ID('dbo.SESIONES'))
     CREATE INDEX IX_Sesiones_idConjuntoActivo ON dbo.SESIONES (idConjuntoActivo);
+GO
+
+-- La aplicación escribe creadaEn, ultimaActividad y revocadaEn con el mismo reloj.
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Sesiones_actividad')
+    ALTER TABLE dbo.SESIONES WITH CHECK ADD CONSTRAINT CK_Sesiones_actividad CHECK (ultimaActividad >= creadaEn);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Sesiones_revocada')
+    ALTER TABLE dbo.SESIONES WITH CHECK ADD CONSTRAINT CK_Sesiones_revocada CHECK (revocadaEn IS NULL OR revocadaEn >= creadaEn);
 GO
 
 /* ---------- 8. Asignaciones solo entre miembros activos del conjunto ---------- */
@@ -230,6 +247,53 @@ BEGIN
             OR NOT EXISTS (SELECT 1 FROM dbo.USUARIO_CONJUNTOS m
                             WHERE m.idUsuario = i.asignadaPor AND m.idConjunto = c.idConjunto AND m.activo = 1))
         THROW 50026, 'El responsable y quien asigna deben tener membresía activa en el conjunto de la solicitud.', 1;
+END;
+GO
+
+/* ---------- 8b. Un correo, un residente y una solicitud no cambian de conjunto ---------- */
+-- El trigger anterior solo mira ASIGNACIONES; el conjunto de una solicitud sale de su correo, así
+-- que mover el correo (o re-apuntar la solicitud a otro correo) la llevaría a otro conjunto con su
+-- responsable. Se crean después del relleno de la sección 3 y de volver la columna NOT NULL: en una
+-- reejecución el relleno no toca filas, y aun así NULL → conjunto se admite (es ese relleno).
+-- Las PK son IDENTITY (no se pueden actualizar): unir inserted y deleted por la PK es fiable.
+
+CREATE OR ALTER TRIGGER dbo.TR_Correos_conjunto_fijo
+ON dbo.CORREOS
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT UPDATE(idConjunto) RETURN;
+    IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.idCorreo = i.idCorreo
+                WHERE d.idConjunto IS NOT NULL AND (i.idConjunto IS NULL OR i.idConjunto <> d.idConjunto))
+        THROW 50027, 'El conjunto de un correo no se puede cambiar.', 1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER dbo.TR_Residentes_conjunto_fijo
+ON dbo.RESIDENTES
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT UPDATE(idConjunto) RETURN;
+    IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.idResidente = i.idResidente
+                WHERE d.idConjunto IS NOT NULL AND (i.idConjunto IS NULL OR i.idConjunto <> d.idConjunto))
+        THROW 50028, 'El conjunto de un residente no se puede cambiar.', 1;
+END;
+GO
+
+-- Separado de TR_Solicitudes_integridad (0004), que no se edita.
+CREATE OR ALTER TRIGGER dbo.TR_Solicitudes_correo_fijo
+ON dbo.SOLICITUDES
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT UPDATE(idCorreo) RETURN;
+    IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.idSolicitud = i.idSolicitud
+                WHERE i.idCorreo <> d.idCorreo)
+        THROW 50029, 'El correo de una solicitud no se puede cambiar.', 1;
 END;
 GO
 

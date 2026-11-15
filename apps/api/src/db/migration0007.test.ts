@@ -272,6 +272,116 @@ describe('0007_conjuntos_y_acceso — asignaciones exigen membresía activa (TR_
   });
 });
 
+describe('0007_conjuntos_y_acceso — correos, residentes y solicitudes no cambian de conjunto', () => {
+  let correoSinResidente: number;
+  let correoEnB: number;
+  let solicitud: number;
+  let residente: number;
+
+  const conjuntoDe = async (idCorreo: number) =>
+    (await q<{ esInicial: number }>(
+      `SELECT CASE WHEN idConjunto = ${CONJ_SQL} THEN 1 ELSE 0 END AS esInicial FROM CORREOS WHERE idCorreo = ${idCorreo}`,
+    ))[0]!.esInicial;
+
+  beforeAll(async () => {
+    // Correo del conjunto inicial sin residente (la FK compuesta no lo ata), con solicitud y asignación vigente.
+    const [ids] = await q<{ correo: number; correoB: number; solicitud: number; residente: number }>(`
+      DECLARE @u TABLE (id INT);
+      DECLARE @c INT, @b INT, @s INT, @r INT;
+      INSERT INTO USUARIOS (nombre, rol, correo) OUTPUT inserted.idUsuario INTO @u VALUES (N'Fijo', 'SOPORTE', 'fijo@demo.mailflow.test');
+      INSERT INTO USUARIO_CONJUNTOS (idUsuario, idConjunto, rol) SELECT id, ${CONJ_SQL}, 'SOPORTE' FROM @u;
+      INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_SQL}, NULL, 'anonimo@mail.com', '<fijo-a@mail>');
+      SET @c = SCOPE_IDENTITY();
+      INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) SELECT @c, 1, idEstado, 1 FROM ESTADOS WHERE nombre = 'NUEVA';
+      SET @s = SCOPE_IDENTITY();
+      INSERT INTO ASIGNACIONES (idSolicitud, idUsuario, asignadaPor) SELECT @s, id, id FROM @u;
+      INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_B}, NULL, 'otro@mail.com', '<fijo-b@mail>');
+      SET @b = SCOPE_IDENTITY();
+      INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, N'Sin correos', 'F-1', 'fijo-res@demo.mailflow.test');
+      SET @r = SCOPE_IDENTITY();
+      SELECT @c AS correo, @b AS correoB, @s AS solicitud, @r AS residente;`);
+    correoSinResidente = ids!.correo;
+    correoEnB = ids!.correoB;
+    solicitud = ids!.solicitud;
+    residente = ids!.residente;
+  });
+
+  it('caso 1: un correo sin residente no se puede mover a otro conjunto (ni su solicitud ni su asignación)', async () => {
+    await expect(q(`UPDATE CORREOS SET idConjunto = ${CONJ_B} WHERE idCorreo = ${correoSinResidente}`)).rejects.toMatchObject({
+      number: 50027,
+      message: expect.stringMatching(/conjunto de un correo/),
+    });
+    expect(await conjuntoDe(correoSinResidente)).toBe(1);
+  });
+
+  it('caso 2: una solicitud no se puede re-apuntar a un correo de otro conjunto', async () => {
+    await expect(q(`UPDATE SOLICITUDES SET idCorreo = ${correoEnB} WHERE idSolicitud = ${solicitud}`)).rejects.toMatchObject({
+      number: 50029,
+      message: expect.stringMatching(/correo de una solicitud/),
+    });
+    const r = await q<{ idCorreo: number }>(`SELECT idCorreo FROM SOLICITUDES WHERE idSolicitud = ${solicitud}`);
+    expect(r[0]?.idCorreo).toBe(correoSinResidente);
+  });
+
+  it('un residente sin correos tampoco cambia de conjunto', async () => {
+    await expect(q(`UPDATE RESIDENTES SET idConjunto = ${CONJ_B} WHERE idResidente = ${residente}`)).rejects.toMatchObject({
+      number: 50028,
+      message: expect.stringMatching(/conjunto de un residente/),
+    });
+  });
+
+  it('multi-fila: basta una fila que cambie de conjunto para rechazar todo el UPDATE', async () => {
+    // correoEnB ya está en B (no cambia); correoSinResidente sí cambiaría.
+    await expect(
+      q(`UPDATE CORREOS SET idConjunto = ${CONJ_B} WHERE idCorreo IN (${correoEnB}, ${correoSinResidente})`),
+    ).rejects.toMatchObject({ number: 50027 });
+    expect(await conjuntoDe(correoSinResidente)).toBe(1);
+    expect(await conjuntoDe(correoEnB)).toBe(0);
+  });
+
+  it('se aceptan los UPDATE que no cambian el conjunto ni el correo (varias filas)', async () => {
+    await q(`UPDATE CORREOS SET idConjunto = idConjunto, asunto = 'sin cambio' WHERE idCorreo IN (${correoEnB}, ${correoSinResidente})`);
+    await q(`UPDATE RESIDENTES SET idConjunto = idConjunto, telefono = '3000000000' WHERE idResidente = ${residente}`);
+    await q(`UPDATE SOLICITUDES SET idCorreo = idCorreo, idPrioridad = 2 WHERE idSolicitud = ${solicitud}`);
+    expect(await conjuntoDe(correoSinResidente)).toBe(1);
+  });
+});
+
+describe('0007_conjuntos_y_acceso — CHECK de RETOS_ACCESO y SESIONES', () => {
+  const nuevoReto = (correo: string, intentos: number) =>
+    q(`INSERT INTO RETOS_ACCESO (idConjunto, correo, codigoHash, existeUsuario, venceEn, reenvioDisponibleEn, intentosFallidos)
+       VALUES (${CONJ_SQL}, '${correo}', 0x${'00'.repeat(32)}, 1, DATEADD(MINUTE, 10, SYSUTCDATETIME()), SYSUTCDATETIME(), ${intentos})`);
+  const sesion = (byte: string, creada: string, actividad: string, revocada = 'NULL') =>
+    q(`INSERT INTO SESIONES (tokenHash, idUsuario, idConjuntoActivo, creadaEn, ultimaActividad, revocadaEn)
+       VALUES (0x${byte.repeat(32)}, 1, ${CONJ_SQL}, ${creada}, ${actividad}, ${revocada})`);
+
+  it('intentosFallidos va de 0 a 5', async () => {
+    await nuevoReto('cinco@demo.mailflow.test', 5);
+    await expect(nuevoReto('seis@demo.mailflow.test', 6)).rejects.toThrow(/CK_Retos_intentos/);
+    await expect(
+      q(`UPDATE RETOS_ACCESO SET intentosFallidos = intentosFallidos + 1 WHERE correo = 'cinco@demo.mailflow.test'`),
+    ).rejects.toThrow(/CK_Retos_intentos/);
+  });
+
+  it('ultimaActividad no es anterior a creadaEn', async () => {
+    await sesion('31', `'2026-01-01T10:00:00'`, `'2026-01-01T10:00:00'`);
+    await expect(sesion('32', `'2026-01-01T10:00:00'`, `'2026-01-01T09:59:59'`)).rejects.toThrow(/CK_Sesiones_actividad/);
+    await expect(
+      q(`UPDATE SESIONES SET ultimaActividad = '2025-12-31' WHERE tokenHash = 0x${'31'.repeat(32)}`),
+    ).rejects.toThrow(/CK_Sesiones_actividad/);
+  });
+
+  it('revocadaEn es NULL o no anterior a creadaEn', async () => {
+    await sesion('33', `'2026-01-01T10:00:00'`, `'2026-01-01T10:00:00'`, `'2026-01-01T10:00:00'`);
+    await expect(
+      sesion('34', `'2026-01-01T10:00:00'`, `'2026-01-01T10:00:00'`, `'2026-01-01T09:00:00'`),
+    ).rejects.toThrow(/CK_Sesiones_revocada/);
+    await expect(
+      q(`UPDATE SESIONES SET revocadaEn = '2025-12-31' WHERE tokenHash = 0x${'31'.repeat(32)}`),
+    ).rejects.toThrow(/CK_Sesiones_revocada/);
+  });
+});
+
 describe('0007_conjuntos_y_acceso — permisos de crm_app', () => {
   const login = `soc_test_${randomBytes(4).toString('hex')}`;
   const password = `Aa1-${randomBytes(18).toString('base64url')}`;
