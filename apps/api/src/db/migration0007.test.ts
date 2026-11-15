@@ -35,10 +35,10 @@ beforeAll(async () => {
   // 1) BD en el estado de 0006 con datos de un único conjunto implícito.
   await migrate({ config, baselinePath, migrationsDir: hasta0006 });
   await q(`
-    INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES (N'Ana', 'T1-101', 'ana@mail.com');
+    INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES (N'Ana', 'T1-101', 'ana@demo.mailflow.test');
     INSERT INTO USUARIOS (nombre, rol, correo, activo) VALUES
       (N'Admin', 'ADMIN', 'admin@demo.mailflow.test', 1), (N'Soporte', 'SOPORTE', 'soporte@demo.mailflow.test', 0);
-    INSERT INTO CORREOS (idResidente, remitente, messageId) VALUES (1, 'ana@mail.com', '<previo-1@mail>'), (NULL, 'x@mail.com', '<previo-2@mail>');
+    INSERT INTO CORREOS (idResidente, remitente, messageId) VALUES (1, 'ana@demo.mailflow.test', '<previo-1@mail>'), (NULL, 'x@demo.mailflow.test', '<previo-2@mail>');
     INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad)
       SELECT 1, 1, idEstado, 1 FROM ESTADOS WHERE nombre = 'NUEVA';
     INSERT INTO GATEWAY_CHECKPOINT (cuenta, uidValidity, ultimoUid) VALUES ('buzon@demo.mailflow.test/INBOX', 3, 10);
@@ -106,6 +106,29 @@ describe('0007_conjuntos_y_acceso — migración de datos existentes', () => {
     await expect(q(`INSERT INTO RESIDENTES (nombre, unidad) VALUES (N'Sin conjunto', 'X-1')`)).rejects.toThrow(/idConjunto/);
   });
 
+  it('cada FK nueva tiene un índice cuya clave empieza por sus columnas', async () => {
+    // Para cada FK de 0007: ¿hay algún índice de la tabla hija cuyas primeras columnas son las de la FK?
+    const r = await q<{ fk: string; cubierta: number }>(`
+      SELECT fk.name AS fk,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM sys.indexes i
+                WHERE i.object_id = fk.parent_object_id
+                  AND NOT EXISTS (
+                    SELECT 1 FROM sys.foreign_key_columns fc
+                     WHERE fc.constraint_object_id = fk.object_id
+                       AND NOT EXISTS (SELECT 1 FROM sys.index_columns ic
+                                        WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
+                                          AND ic.column_id = fc.parent_column_id AND ic.key_ordinal = fc.constraint_column_id))
+             ) THEN 1 ELSE 0 END AS cubierta
+        FROM sys.foreign_keys fk
+       WHERE fk.name IN ('FK_UsuConj_Usuarios', 'FK_UsuConj_Conjuntos', 'FK_Residentes_Conjuntos', 'FK_Correos_Conjuntos',
+                         'FK_Checkpoint_Conjuntos', 'FK_Correos_Residentes_conjunto', 'FK_Retos_Conjuntos',
+                         'FK_Sesiones_Usuarios', 'FK_Sesiones_Conjuntos')
+       ORDER BY fk.name`);
+    expect(r).toHaveLength(9);
+    expect(r.filter((x) => x.cubierta === 0).map((x) => x.fk)).toEqual([]);
+  });
+
   it('es idempotente: migrate no reaplica nada', async () => {
     const res = await migrate({ config, baselinePath, migrationsDir: realMigrations });
     expect(res.aplicadas).toEqual([]);
@@ -133,31 +156,35 @@ describe('0007_conjuntos_y_acceso — integridad entre conjuntos', () => {
   });
 
   it('el mismo correo de residente se acepta en otro conjunto y se rechaza en el mismo', async () => {
-    await q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_B}, N'Ana B', 'B-1', 'ana@mail.com')`);
+    await q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_B}, N'Ana B', 'B-1', 'ana@demo.mailflow.test')`);
     await expect(
-      q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, N'Otra', 'T2-1', 'ana@mail.com')`),
+      q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, N'Otra', 'T2-1', 'ana@demo.mailflow.test')`),
     ).rejects.toThrow(/UX_Residentes_correo/);
   });
 
   it('el mismo messageId se acepta en otro conjunto y se rechaza en el mismo', async () => {
-    await q(`INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_B}, 'x@mail.com', '<previo-1@mail>')`);
+    await q(`INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_B}, 'x@demo.mailflow.test', '<previo-1@mail>')`);
     await expect(
-      q(`INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x@mail.com', '<previo-1@mail>')`),
+      q(`INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x@demo.mailflow.test', '<previo-1@mail>')`),
     ).rejects.toThrow(/UX_Correos_messageId/);
   });
 
   it('un correo no puede apuntar a un residente de otro conjunto; sin residente se acepta', async () => {
     await expect(
       q(`INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_SQL},
-           (SELECT idResidente FROM RESIDENTES WHERE idConjunto = ${CONJ_B}), 'ana@mail.com', '<cruce@mail>')`),
+           (SELECT idResidente FROM RESIDENTES WHERE idConjunto = ${CONJ_B}), 'ana@demo.mailflow.test', '<cruce@mail>')`),
     ).rejects.toThrow(/FK_Correos_Residentes_conjunto/);
-    await q(`INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_B}, NULL, 'y@mail.com', '<sin-res@mail>')`);
+    await q(`INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_B}, NULL, 'y@demo.mailflow.test', '<sin-res@mail>')`);
   });
 
   it('los colores del conjunto deben ser #RRGGBB o NULL', async () => {
     await expect(q(`INSERT INTO CONJUNTOS (slug, nombre, colorPrimario) VALUES ('malo-1', N'M', '355E3B')`)).rejects.toThrow(/CK_Conjuntos_colorPrimario/);
     await expect(q(`INSERT INTO CONJUNTOS (slug, nombre, colorAcento) VALUES ('malo-2', N'M', '#GGGGGG')`)).rejects.toThrow(/CK_Conjuntos_colorAcento/);
     await expect(q(`INSERT INTO CONJUNTOS (slug, nombre, colorSecundario) VALUES ('malo-3', N'M', '#FFF')`)).rejects.toThrow(/CK_Conjuntos_colorSecundario/);
+    // Con la collation CI, 'á' cae dentro del rango [A-Fa-f]: los CHECK comparan en binario.
+    await expect(q(`INSERT INTO CONJUNTOS (slug, nombre, colorPrimario) VALUES ('malo-4', N'M', '#35áE3B')`)).rejects.toThrow(/CK_Conjuntos_colorPrimario/);
+    await expect(q(`INSERT INTO CONJUNTOS (slug, nombre, colorAcento) VALUES ('malo-5', N'M', '#D6Á64F')`)).rejects.toThrow(/CK_Conjuntos_colorAcento/);
+    await expect(q(`INSERT INTO CONJUNTOS (slug, nombre, colorSecundario) VALUES ('malo-6', N'M', '#7896é3')`)).rejects.toThrow(/CK_Conjuntos_colorSecundario/);
   });
 
   it('el rol de la membresía es ADMIN o SOPORTE, y un reto por (conjunto, correo)', async () => {
@@ -224,6 +251,24 @@ describe('0007_conjuntos_y_acceso — asignaciones exigen membresía activa (TR_
     await expect(
       q(`UPDATE ASIGNACIONES SET idUsuario = ${soloB} WHERE idSolicitud = ${solicitud}`),
     ).rejects.toMatchObject({ number: 50026 });
+  });
+
+  it('mover una asignación a una solicitud de otro conjunto exige membresía allí', async () => {
+    await q(`UPDATE USUARIO_CONJUNTOS SET activo = 1 WHERE idUsuario = ${soporteA}`);
+    const enB = await q<{ id: number }>(`
+      DECLARE @c INT;
+      DECLARE @s TABLE (id INT);
+      INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_B}, 'z@demo.mailflow.test', '<mover@mail>');
+      SET @c = SCOPE_IDENTITY();
+      INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) OUTPUT inserted.idSolicitud INTO @s
+        SELECT @c, 1, idEstado, 1 FROM ESTADOS WHERE nombre = 'NUEVA';
+      SELECT id FROM @s;`);
+    const idAsignacion = (await q<{ id: number }>(
+      `SELECT TOP (1) idAsignacion AS id FROM ASIGNACIONES WHERE idSolicitud = ${solicitud} AND idUsuario = ${soporteA}`,
+    ))[0]!.id;
+    await expect(
+      q(`UPDATE ASIGNACIONES SET idSolicitud = ${enB[0]!.id} WHERE idAsignacion = ${idAsignacion}`),
+    ).rejects.toMatchObject({ number: 50026, message: expect.stringMatching(/membresía activa/) });
   });
 });
 

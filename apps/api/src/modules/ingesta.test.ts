@@ -178,60 +178,71 @@ describe('T1 · ingestarCorreo', () => {
 describe('T1 · multi-conjunto', () => {
   let inicial: number;
   let otro: number;
+  let ana: number;
+  let beto: number;
 
   beforeAll(async () => {
     inicial = await idConjuntoInicial(db);
     const r = await db.q<{ id: number }>(`
       INSERT INTO CONJUNTOS (slug, nombre) OUTPUT inserted.idConjunto AS id VALUES ('torres-del-norte', N'Torres del Norte');`);
     otro = r[0]!.id;
+    ana = (await db.q<{ id: number }>(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) OUTPUT inserted.idResidente AS id
+      VALUES (${inicial}, N'Ana', 'P-1', 'ana@demo.mailflow.test')`))[0]!.id;
     // Beto está registrado solo en el otro conjunto.
-    await db.q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${otro}, N'Beto', 'N-1', 'beto@mail.com')`);
+    beto = (await db.q<{ id: number }>(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) OUTPUT inserted.idResidente AS id
+      VALUES (${otro}, N'Beto', 'N-1', 'beto@demo.mailflow.test')`))[0]!.id;
   });
 
   const conjuntoDe = (idCorreo: number) =>
     db.q<{ idConjunto: number }>(`SELECT idConjunto FROM CORREOS WHERE idCorreo = ${idCorreo}`).then((r) => r[0]?.idConjunto);
 
   it('sin idConjunto el correo queda en el conjunto inicial', async () => {
-    const r = await ingestarCorreo(db.pool, { messageId: '<mc-defecto>', remitente: 'ana@mail.com', asunto: 'Hola' });
+    const r = await ingestarCorreo(db.pool, { messageId: '<mc-defecto>', remitente: 'ana@demo.mailflow.test', asunto: 'Hola' });
     if (r.duplicado) throw new Error('inesperado');
     expect(await conjuntoDe(r.idCorreo)).toBe(inicial);
-    expect(r.idResidente).toBe(1);
+    expect(r.idResidente).toBe(ana);
   });
 
   it('el mismo messageId en dos conjuntos crea dos solicitudes; repetido en el mismo es duplicado', async () => {
-    const a = await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@mail.com', idConjunto: inicial });
-    const b = await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@mail.com', idConjunto: otro });
+    const a = await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@demo.mailflow.test', idConjunto: inicial });
+    const b = await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@demo.mailflow.test', idConjunto: otro });
     expect(a.duplicado).toBe(false);
     expect(b.duplicado).toBe(false);
     if (a.duplicado || b.duplicado) return;
     expect(a.idSolicitud).not.toBe(b.idSolicitud);
     expect(await conjuntoDe(b.idCorreo)).toBe(otro);
-    expect(await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@mail.com', idConjunto: otro })).toEqual({ duplicado: true });
+    expect(await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@demo.mailflow.test', idConjunto: otro })).toEqual({ duplicado: true });
   });
 
   it('el residente se vincula solo si su correo está registrado en ese conjunto', async () => {
-    const enOtro = await ingestarCorreo(db.pool, { messageId: '<mc-beto-1>', remitente: 'beto@mail.com', idConjunto: otro });
-    const enInicial = await ingestarCorreo(db.pool, { messageId: '<mc-beto-2>', remitente: 'beto@mail.com', idConjunto: inicial });
-    const anaEnOtro = await ingestarCorreo(db.pool, { messageId: '<mc-ana-otro>', remitente: 'ana@mail.com', idConjunto: otro });
-    expect(enOtro).toMatchObject({ duplicado: false, idResidente: expect.any(Number) });
+    const enOtro = await ingestarCorreo(db.pool, { messageId: '<mc-beto-1>', remitente: 'beto@demo.mailflow.test', idConjunto: otro });
+    const enInicial = await ingestarCorreo(db.pool, { messageId: '<mc-beto-2>', remitente: 'beto@demo.mailflow.test', idConjunto: inicial });
+    const anaEnOtro = await ingestarCorreo(db.pool, { messageId: '<mc-ana-otro>', remitente: 'ana@demo.mailflow.test', idConjunto: otro });
+    expect(enOtro).toMatchObject({ duplicado: false, idResidente: beto });
     expect(enInicial).toMatchObject({ duplicado: false, idResidente: null });
     expect(anaEnOtro).toMatchObject({ duplicado: false, idResidente: null });
   });
 
   it('un checkpoint cuya cuenta pertenece a otro conjunto hace fallar la transacción sin guardar el correo', async () => {
-    const cuenta = 'compartida@gmail.com/INBOX';
-    await ingestarCorreo(db.pool, { messageId: '<mc-cp-1>', remitente: 'ana@mail.com', idConjunto: inicial, checkpoint: { cuenta, uidValidity: 1, uid: 1 } });
+    const cuenta = 'compartida@demo.mailflow.test/INBOX';
+    await ingestarCorreo(db.pool, { messageId: '<mc-cp-1>', remitente: 'ana@demo.mailflow.test', idConjunto: inicial, checkpoint: { cuenta, uidValidity: 1, uid: 1 } });
     const antes = await conteos();
     await expect(
-      ingestarCorreo(db.pool, { messageId: '<mc-cp-2>', remitente: 'ana@mail.com', idConjunto: otro, checkpoint: { cuenta, uidValidity: 1, uid: 2 } }),
+      ingestarCorreo(db.pool, { messageId: '<mc-cp-2>', remitente: 'ana@demo.mailflow.test', idConjunto: otro, checkpoint: { cuenta, uidValidity: 1, uid: 2 } }),
     ).rejects.toThrow(/otro conjunto/);
     expect(await conteos()).toEqual(antes);
     const cp = await db.q<{ idConjunto: number; ultimoUid: string }>(`SELECT idConjunto, ultimoUid FROM GATEWAY_CHECKPOINT WHERE cuenta = '${cuenta}'`);
     expect(cp).toEqual([{ idConjunto: inicial, ultimoUid: '1' }]);
   });
 
-  it('un conjunto inexistente no recibe correos', async () => {
-    await expect(ingestarCorreo(db.pool, { messageId: '<mc-nada>', remitente: 'ana@mail.com', idConjunto: 999_999 })).rejects.toThrow(/conjunto/i);
+  it('un conjunto inexistente o inactivo no recibe correos: falla sin guardar nada', async () => {
+    const inactivo = (await db.q<{ id: number }>(
+      `INSERT INTO CONJUNTOS (slug, nombre, activo) OUTPUT inserted.idConjunto AS id VALUES ('dado-de-baja', N'Dado de baja', 0)`,
+    ))[0]!.id;
+    const antes = await conteos();
+    await expect(ingestarCorreo(db.pool, { messageId: '<mc-nada>', remitente: 'ana@demo.mailflow.test', idConjunto: 999_999 })).rejects.toThrow(/conjunto/i);
+    await expect(ingestarCorreo(db.pool, { messageId: '<mc-baja>', remitente: 'ana@demo.mailflow.test', idConjunto: inactivo })).rejects.toThrow(/inactivo/i);
+    expect(await conteos()).toEqual(antes);
   });
 
   it('listarConjuntos devuelve los activos ordenados por nombre, con paleta solo si hay primario y acento', async () => {

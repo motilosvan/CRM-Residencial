@@ -87,8 +87,8 @@ function clasificarSeguro(asunto: string, cuerpo: string): { categoria: Categori
 }
 
 /**
- * Conjunto de la ingesta: el indicado o, si no se indica, el inicial. Debe existir: un id inventado
- * no puede guardar correos (lo impediría la FK, pero así el error es explícito).
+ * Conjunto de la ingesta: el indicado o, si no se indica, el inicial. Debe existir y estar activo
+ * (como en `idConjuntoPorSlug`): un conjunto dado de baja no recibe correos.
  */
 async function resolverConjunto(tx: Tx, idConjunto: number | undefined): Promise<number> {
   const r = await tx
@@ -97,10 +97,15 @@ async function resolverConjunto(tx: Tx, idConjunto: number | undefined): Promise
     .input('slugInicial', sql.VarChar(80), SLUG_CONJUNTO_INICIAL)
     .query<{ idConjunto: number }>(
       `SELECT idConjunto FROM CONJUNTOS
-        WHERE idConjunto = COALESCE(@idConjunto, (SELECT idConjunto FROM CONJUNTOS WHERE slug = @slugInicial))`,
+        WHERE idConjunto = COALESCE(@idConjunto, (SELECT idConjunto FROM CONJUNTOS WHERE slug = @slugInicial))
+          AND activo = 1`,
     );
   const fila = r.recordset[0];
-  if (!fila) throw new NotFound(idConjunto === undefined ? 'Falta el conjunto inicial (¿se aplicó 0007?)' : 'El conjunto no existe');
+  if (!fila) {
+    throw new NotFound(
+      idConjunto === undefined ? 'Falta el conjunto inicial o está inactivo (¿se aplicó 0007?)' : 'El conjunto no existe o está inactivo',
+    );
+  }
   return fila.idConjunto;
 }
 

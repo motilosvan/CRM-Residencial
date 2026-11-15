@@ -26,13 +26,14 @@ IF OBJECT_ID('dbo.CONJUNTOS', 'U') IS NULL
         colorSecundario CHAR(7)       NULL,
         activo          BIT           NOT NULL CONSTRAINT DF_Conjuntos_activo DEFAULT 1,
         fechaCreacion   DATETIME2     NOT NULL CONSTRAINT DF_Conjuntos_fecha DEFAULT SYSUTCDATETIME(),
-        -- #RRGGBB o NULL (CHAR(7) rellena con espacios: '#FFF' no pasa).
+        -- #RRGGBB o NULL (CHAR(7) rellena con espacios: '#FFF' no pasa). En binario: con la
+        -- collation CI, letras acentuadas como 'á' caen dentro del rango [A-Fa-f].
         CONSTRAINT CK_Conjuntos_colorPrimario
-            CHECK (colorPrimario IS NULL OR colorPrimario LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'),
+            CHECK (colorPrimario IS NULL OR colorPrimario COLLATE Latin1_General_100_BIN2 LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'),
         CONSTRAINT CK_Conjuntos_colorAcento
-            CHECK (colorAcento IS NULL OR colorAcento LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'),
+            CHECK (colorAcento IS NULL OR colorAcento COLLATE Latin1_General_100_BIN2 LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'),
         CONSTRAINT CK_Conjuntos_colorSecundario
-            CHECK (colorSecundario IS NULL OR colorSecundario LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]')
+            CHECK (colorSecundario IS NULL OR colorSecundario COLLATE Latin1_General_100_BIN2 LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]')
     );
 GO
 
@@ -148,6 +149,18 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_Correos_Residente
         FOREIGN KEY (idConjunto, idResidente) REFERENCES dbo.RESIDENTES (idConjunto, idResidente);
 GO
 
+/* ---------- 5b. Índices de apoyo de las FK nuevas ---------- */
+-- Ya cubiertas por otro índice cuya clave empieza por sus columnas: FK_Residentes_Conjuntos
+-- (UQ_Residentes_conjunto_id), FK_Correos_Conjuntos (UX_Correos_messageId), FK_UsuConj_Usuarios
+-- (PK_UsuarioConjuntos) y FK_Retos_Conjuntos (UX_Retos_conjunto_correo).
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Correos_conjunto_residente' AND object_id = OBJECT_ID('dbo.CORREOS'))
+    CREATE INDEX IX_Correos_conjunto_residente ON dbo.CORREOS (idConjunto, idResidente);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Checkpoint_idConjunto' AND object_id = OBJECT_ID('dbo.GATEWAY_CHECKPOINT'))
+    CREATE INDEX IX_Checkpoint_idConjunto ON dbo.GATEWAY_CHECKPOINT (idConjunto);
+GO
+
 /* ---------- 6. RETOS_ACCESO: códigos de acceso (solo el hash) ---------- */
 
 IF OBJECT_ID('dbo.RETOS_ACCESO', 'U') IS NULL
@@ -188,11 +201,15 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Sesiones_idUsuario' AND object_id = OBJECT_ID('dbo.SESIONES'))
     CREATE INDEX IX_Sesiones_idUsuario ON dbo.SESIONES (idUsuario);
 GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Sesiones_idConjuntoActivo' AND object_id = OBJECT_ID('dbo.SESIONES'))
+    CREATE INDEX IX_Sesiones_idConjuntoActivo ON dbo.SESIONES (idConjuntoActivo);
+GO
 
 /* ---------- 8. Asignaciones solo entre miembros activos del conjunto ---------- */
--- El conjunto de una solicitud es el de su correo. Al insertar, o al cambiar responsable o
--- asignador, ambos deben tener membresía activa en ese conjunto. Liberar una asignación
--- (UPDATE de liberadaEn) no lo exige: si no, una membresía desactivada impediría reasignar.
+-- El conjunto de una solicitud es el de su correo. Al insertar, o al cambiar responsable,
+-- asignador o solicitud (moverla a otro conjunto), ambos deben tener membresía activa en ese
+-- conjunto. Liberar una asignación (UPDATE de liberadaEn) no lo exige: si no, una membresía
+-- desactivada impediría reasignar.
 
 CREATE OR ALTER TRIGGER dbo.TR_Asignaciones_membresia
 ON dbo.ASIGNACIONES
@@ -201,7 +218,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
-    IF NOT (UPDATE(idUsuario) OR UPDATE(asignadaPor)) RETURN;
+    IF NOT (UPDATE(idUsuario) OR UPDATE(asignadaPor) OR UPDATE(idSolicitud)) RETURN;
 
     IF EXISTS (
         SELECT 1
