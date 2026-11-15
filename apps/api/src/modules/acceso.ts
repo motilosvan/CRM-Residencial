@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { withTx, type Tx } from '../db/withTx.js';
 import { ErrorAcceso, ValidationError } from '../errors.js';
 import type { EnviadorCodigo } from './enviador.js';
+import { paso, type Hooks } from './hooks.js';
 import { validar } from './solicitudes.js';
 
 /** Valores del spec (los mismos de `apps/web/src/services/mock/authMock.ts`). */
@@ -20,6 +21,8 @@ export interface DepsAcceso {
   generarCodigo?: () => string;
   /** Recibe solo el tipo de error del envío: nunca el correo ni el código. */
   registrarError?: (d: string) => void;
+  /** Solo pruebas: punto 'reto', justo después de leer y bloquear el reto. */
+  hooks?: Hooks;
 }
 
 const conjuntoId = z.string().regex(/^\d{1,9}$/, 'conjunto inválido').transform(Number);
@@ -132,6 +135,7 @@ export async function solicitarCodigo(
     const conjunto = await nombreConjuntoActivo(tx, p.conjuntoId);
     const idUsuario = await miembroActivo(tx, p.conjuntoId, p.correo);
     const reto = await bloquearReto(tx, p.conjuntoId, p.correo);
+    await paso(deps.hooks, 'reto');
 
     let desbloquear = false;
     if (reto?.bloqueadoHasta) {
@@ -196,45 +200,57 @@ export async function verificarCodigo(
   const r = await withTx(pool, async (tx): Promise<Resultado<{ idUsuario: number; idConjunto: number }>> => {
     await nombreConjuntoActivo(tx, p.conjuntoId);
     const reto = await bloquearReto(tx, p.conjuntoId, p.correo);
+    await paso(deps.hooks, 'reto');
     if (!reto) return fallo(new ErrorAcceso(400, 'CODIGO_INCORRECTO', { intentosRestantes: MAX_INTENTOS }));
 
-    let fallidos = reto.intentosFallidos;
+    let reiniciar = false;
     if (reto.bloqueadoHasta) {
       if (t < reto.bloqueadoHasta.getTime()) return fallo(bloqueado(reto.bloqueadoHasta));
-      fallidos = 0; // bloqueo vencido: el contador vuelve a empezar (como en el mock)
+      reiniciar = true; // bloqueo vencido: el contador vuelve a empezar (como en el mock)
     }
     if (reto.consumidoEn === null && t > reto.venceEn.getTime()) return fallo(new ErrorAcceso(410, 'CODIGO_VENCIDO'));
 
-    const coincide = timingSafeEqual(reto.codigoHash, hashCodigo(deps.secreto, p.conjuntoId, p.correo, p.codigo));
+    const hash = hashCodigo(deps.secreto, p.conjuntoId, p.correo, p.codigo);
+    const coincide = timingSafeEqual(reto.codigoHash, hash);
     if (coincide && reto.consumidoEn === null && reto.existeUsuario) {
       const idUsuario = await miembroActivo(tx, p.conjuntoId, p.correo);
       if (idUsuario !== null) {
-        await tx
+        // Respaldo del UPDLOCK: solo consume si sigue sin consumir y con el mismo código.
+        const usado = await tx
           .request()
           .input('id', sql.BigInt, reto.idReto)
+          .input('hash', sql.VarBinary(32), hash)
           .input('ahora', sql.DateTime2, ahora)
-          .query('UPDATE dbo.RETOS_ACCESO SET consumidoEn = @ahora, intentosFallidos = 0, bloqueadoHasta = NULL WHERE idReto = @id');
-        return { ok: true, valor: { idUsuario, idConjunto: p.conjuntoId } };
+          .query(
+            `UPDATE dbo.RETOS_ACCESO SET consumidoEn = @ahora, intentosFallidos = 0, bloqueadoHasta = NULL
+              WHERE idReto = @id AND consumidoEn IS NULL AND codigoHash = @hash`,
+          );
+        if (usado.rowsAffected[0] === 1) return { ok: true, valor: { idUsuario, idConjunto: p.conjuntoId } };
+        // Otra transacción lo consumió o lo renovó: cuenta como intento fallido.
       }
     }
 
-    fallidos += 1;
-    const bloquea = fallidos >= MAX_INTENTOS;
-    const hasta = bloquea ? new Date(t + BLOQUEO_MS) : null;
-    await tx
+    // El conteo sale de la fila (intentosFallidos + 1), no del valor leído; OUTPUT devuelve el resultado.
+    const hastaSiBloquea = new Date(t + BLOQUEO_MS);
+    const conteo = await tx
       .request()
       .input('id', sql.BigInt, reto.idReto)
-      .input('fallidos', sql.TinyInt, fallidos)
-      .input('hasta', sql.DateTime2, hasta)
+      .input('reiniciar', sql.Bit, reiniciar)
+      .input('max', sql.TinyInt, MAX_INTENTOS)
+      .input('hasta', sql.DateTime2, hastaSiBloquea)
       .input('ahora', sql.DateTime2, ahora)
-      .input('bloquea', sql.Bit, bloquea)
-      .query(
-        `UPDATE dbo.RETOS_ACCESO
-            SET intentosFallidos = @fallidos, bloqueadoHasta = @hasta,
-                consumidoEn = CASE WHEN @bloquea = 1 THEN @ahora ELSE consumidoEn END
-          WHERE idReto = @id`,
+      .query<{ fallidos: number }>(
+        `UPDATE r
+            SET intentosFallidos = n.fallidos,
+                bloqueadoHasta = CASE WHEN n.fallidos >= @max THEN @hasta ELSE NULL END,
+                consumidoEn = CASE WHEN n.fallidos >= @max THEN @ahora ELSE r.consumidoEn END
+         OUTPUT inserted.intentosFallidos AS fallidos
+           FROM dbo.RETOS_ACCESO r
+          CROSS APPLY (SELECT CASE WHEN @reiniciar = 1 THEN 0 ELSE r.intentosFallidos END + 1 AS fallidos) n
+          WHERE r.idReto = @id`,
       );
-    if (hasta) return fallo(bloqueado(hasta));
+    const fallidos = conteo.recordset[0]!.fallidos;
+    if (fallidos >= MAX_INTENTOS) return fallo(bloqueado(hastaSiBloquea));
     return fallo(new ErrorAcceso(400, 'CODIGO_INCORRECTO', { intentosRestantes: MAX_INTENTOS - fallidos }));
   });
 

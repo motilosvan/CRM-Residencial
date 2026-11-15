@@ -3,6 +3,7 @@ import { crearUsuario, idConjuntoInicial, setupTestDb, type TestDb } from '../..
 import { ErrorAcceso, ValidationError } from '../errors.js';
 import { hashCodigo, solicitarCodigo, verificarCodigo, type DepsAcceso } from './acceso.js';
 import { EnviadorLocal, type EnviadorCodigo } from './enviador.js';
+import type { Hooks } from './hooks.js';
 
 const T0 = Date.UTC(2026, 10, 15, 12, 0, 0);
 const SECRETO = 'secreto-de-pruebas-con-al-menos-32-caracteres';
@@ -52,7 +53,8 @@ beforeAll(async () => {
   conjuntoId = String(conjunto);
   idAdmin = await crearUsuario(db, { nombre: 'Admin Demo', correo: 'admin@demo.mailflow.test', rol: 'ADMIN' });
   for (const correo of ['feliz@demo.mailflow.test', 'reenvio@demo.mailflow.test', 'bloqueo@demo.mailflow.test',
-    'carrera@demo.mailflow.test', 'foco5@demo.mailflow.test', 'falla@demo.mailflow.test']) {
+    'carrera@demo.mailflow.test', 'foco5@demo.mailflow.test', 'falla@demo.mailflow.test',
+    'bloqueo-ok@demo.mailflow.test', 'bloqueo-mal@demo.mailflow.test', 'bloqueo-nuevo@demo.mailflow.test']) {
     await crearUsuario(db, { nombre: 'Soporte', correo, rol: 'SOPORTE' });
   }
   await crearUsuario(db, { nombre: 'Inactivo', correo: 'inactivo@demo.mailflow.test', rol: 'SOPORTE', activo: false });
@@ -222,6 +224,126 @@ describe('Acceso · focos', () => {
     expect(rechazos).toHaveLength(1);
     expect(rechazos[0]!.reason).toBeInstanceOf(ErrorAcceso);
     expect((rechazos[0]!.reason as ErrorAcceso).codigo).toBe('CODIGO_INCORRECTO');
+  });
+});
+
+/**
+ * Concurrencia determinista (patrón de `ingesta.test.ts`): A se detiene en el paso 'reto', con el reto ya
+ * leído y bloqueado, y no sigue hasta que la prueba la suelta. Mientras tanto se lanza B y se comprueba,
+ * por el estado del servidor y no por tiempo, que B espera un bloqueo (LCK_M_*) sin llegar a 'reto'.
+ * Sin `WITH (UPDLOCK, HOLDLOCK)`, B leería la versión anterior (RCSI) y llegaría a 'reto' durante la pausa.
+ */
+describe('Acceso · bloqueo del reto entre transacciones simultáneas', () => {
+  const ESPERA_MS = 5000;
+
+  /** Hook que detiene a quien lo use en 'reto' hasta `soltar()`. */
+  function pausaEnReto() {
+    let avisar!: () => void;
+    let soltar!: () => void;
+    const llegada = new Promise<void>((r) => (avisar = r));
+    const suelta = new Promise<void>((r) => (soltar = r));
+    const hooks: Hooks = {
+      despuesDe: async (p) => {
+        if (p !== 'reto') return;
+        avisar();
+        await suelta;
+      },
+    };
+    const llego = () =>
+      Promise.race([
+        llegada,
+        new Promise<never>((_, rechazar) => setTimeout(() => rechazar(new Error("A no llegó al paso 'reto'")), ESPERA_MS)),
+      ]);
+    return { hooks, llego, soltar };
+  }
+
+  /** Esperas de bloqueo de otras sesiones en la BD de pruebas (conexión de administrador). */
+  const esperasDeBloqueo = async () =>
+    (await db.q<{ wait_type: string }>(
+      `SELECT r.wait_type FROM sys.dm_exec_requests r
+        WHERE r.database_id = DB_ID() AND r.session_id <> @@SPID AND r.wait_type LIKE 'LCK[_]M[_]%'`,
+    )).map((r) => r.wait_type);
+
+  /**
+   * Lanza A (pausada en 'reto') y después B; comprueba que B queda esperando el bloqueo de A sin llegar a
+   * 'reto', suelta a A y devuelve los dos resultados [A, B].
+   */
+  async function carrera<T>(op: (hooks: Hooks) => Promise<T>, esperaEsperada: RegExp) {
+    const a = pausaEnReto();
+    const pa = op(a.hooks);
+    const resultadoA = Promise.allSettled([pa]);
+    await a.llego();
+
+    let bLlego = false;
+    const pb = op({ despuesDe: (p) => void (p === 'reto' && (bLlego = true)) });
+    const resultadoB = Promise.allSettled([pb]);
+
+    let esperas: string[] = [];
+    try {
+      // Hasta que B quede bloqueada o (con la mutación) llegue a 'reto'.
+      await vi.waitFor(async () => {
+        esperas = await esperasDeBloqueo();
+        if (!bLlego && esperas.length === 0) throw new Error('B aún no espera');
+      }, { timeout: ESPERA_MS, interval: 10 });
+      expect(bLlego, "B llegó a 'reto' mientras A tenía el reto").toBe(false);
+      expect(esperas).toHaveLength(1);
+      expect(esperas[0]).toMatch(esperaEsperada);
+    } finally {
+      a.soltar();
+    }
+    const [[ra], [rb]] = await Promise.all([resultadoA, resultadoB]);
+    expect(bLlego, 'B llega a su paso una vez que A confirma').toBe(true);
+    return [ra!, rb!] as const;
+  }
+
+  it('dos códigos correctos simultáneos: B espera a A (LCK_M_U); A entra y B recibe CODIGO_INCORRECTO', async () => {
+    const correo = 'bloqueo-ok@demo.mailflow.test';
+    await solicitarCodigo(db.pool, deps(), { conjuntoId, correo });
+    const [a, b] = await carrera(
+      (hooks) => verificarCodigo(db.pool, deps({ hooks }), { conjuntoId, correo, codigo: '111111' }),
+      /^LCK_M_U$/,
+    );
+    expect(a.status).toBe('fulfilled');
+    expect(b.status).toBe('rejected');
+    const err = (b as PromiseRejectedResult).reason as ErrorAcceso;
+    expect(err).toBeInstanceOf(ErrorAcceso);
+    expect(err.codigo).toBe('CODIGO_INCORRECTO');
+    expect(err.detalle).toEqual({ intentosRestantes: 4 });
+    const [fila] = await reto(correo);
+    expect(fila!.consumidoEn?.getTime()).toBe(T0);
+    expect(fila!.intentosFallidos).toBe(1);
+  });
+
+  it('dos códigos incorrectos simultáneos: intentosFallidos sube en 2 y cada uno ve su propio conteo', async () => {
+    const correo = 'bloqueo-mal@demo.mailflow.test';
+    await solicitarCodigo(db.pool, deps(), { conjuntoId, correo });
+    const [a, b] = await carrera(
+      (hooks) => verificarCodigo(db.pool, deps({ hooks }), { conjuntoId, correo, codigo: '000000' }),
+      /^LCK_M_U$/,
+    );
+    const detalles = [a, b].map((r) => {
+      expect(r.status).toBe('rejected');
+      const e = (r as PromiseRejectedResult).reason as ErrorAcceso;
+      expect(e.codigo).toBe('CODIGO_INCORRECTO');
+      return e.detalle;
+    });
+    expect(detalles).toEqual([{ intentosRestantes: 4 }, { intentosRestantes: 3 }]);
+    expect((await reto(correo))[0]!.intentosFallidos).toBe(2);
+  });
+
+  it('primer solicitarCodigo simultáneo de un correo sin reto: B espera el rango de A (LCK_M_RS_U); sin 2601 ni 500', async () => {
+    const correo = 'bloqueo-nuevo@demo.mailflow.test';
+    expect(await reto(correo)).toEqual([]);
+    const [a, b] = await carrera(
+      (hooks) => solicitarCodigo(db.pool, deps({ hooks }), { conjuntoId, correo }),
+      /^LCK_M_RS_U$/, // HOLDLOCK sobre el hueco: bloqueo de rango (RangeS-U)
+    );
+    expect(a).toEqual({ status: 'fulfilled', value: { venceEn: T0 + 600_000, reenvioDisponibleEn: T0 + 60_000 } });
+    expect(b.status).toBe('rejected');
+    const err = (b as PromiseRejectedResult).reason as ErrorAcceso;
+    expect(err).toBeInstanceOf(ErrorAcceso);
+    expect(err.codigo).toBe('REENVIO_PRONTO');
+    expect(await reto(correo)).toHaveLength(1);
   });
 });
 
