@@ -4,6 +4,7 @@ import { Link, Navigate, useSearchParams } from 'react-router';
 import { Logo } from '@/components/marca/Logo';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { EsqueletoCarga } from '@/components/EsqueletoCarga';
 import { useSesion } from '@/store/sesion';
 import type { Conjunto } from '@/types/conjunto';
 import type { CodigoEnviado } from '@/services/contratos';
@@ -87,6 +88,7 @@ export default function LoginPage() {
   const [paso2, setPaso2] = useState<DatosPaso2 | null>(null);
   const [sentido, setSentido] = useState<'sig' | 'ant'>('sig');
   const sesion = useSesion((s) => s.sesion);
+  const estado = useSesion((s) => s.estado);
 
   function continuar(r: ResultadoPaso1) {
     setBorrador({ conjuntoId: r.conjunto.id, correo: r.correo });
@@ -101,6 +103,7 @@ export default function LoginPage() {
 
   const paso = paso2 ? 2 : 1;
 
+  if (estado === 'cargando') return <EsqueletoCarga />;
   if (sesion) return <Navigate replace to={`/app/${sesion.conjuntoActivo.slug}`} />;
 
   return (

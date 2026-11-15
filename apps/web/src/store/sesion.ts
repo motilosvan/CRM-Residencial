@@ -34,7 +34,9 @@ interface SesionState {
   ultimaActividad: number | null;
   motivoCierre: MotivoCierre | null;
   /** Último rechazo de `cambiarConjunto`; la guarda decide entre 403 y reintento. */
-  errorCambio: CodigoErrorAuth | null;
+  errorCambio: { slug: string; codigo: CodigoErrorAuth } | null;
+  /** Avanza con cada inicio, cierre, rehidratación y cambio: invalida respuestas tardías. */
+  generacion: number;
   iniciar(s: Sesion): void;
   rehidratar(): Promise<void>;
   /** Limpia el store (sin avisar al servidor). */
@@ -88,17 +90,32 @@ export const useSesion = create<SesionState>()(
       ultimaActividad: null,
       motivoCierre: null,
       errorCambio: null,
+      generacion: 0,
       iniciar: (s) => {
         const ahora = Date.now();
-        set({ sesion: { ...s, ultimaActividad: ahora }, ultimaActividad: ahora, motivoCierre: null, estado: 'lista' });
+        set({
+          sesion: { ...s, ultimaActividad: ahora },
+          ultimaActividad: ahora,
+          motivoCierre: null,
+          estado: 'lista',
+          errorCambio: null,
+          generacion: get().generacion + 1,
+        });
       },
       rehidratar: async () => {
         const previa = get().ultimaActividad;
+        const generacion = get().generacion + 1;
+        set({ generacion });
         let remota: Sesion | null = null;
         try {
           remota = await authService.sesion();
         } catch {
           remota = null;
+        }
+        if (get().generacion !== generacion) {
+          // Algo cambió la sesión mientras esperaba: esta respuesta ya no manda.
+          set({ estado: 'lista' });
+          return;
         }
         const ahora = Date.now();
         if (remota) {
@@ -113,7 +130,8 @@ export const useSesion = create<SesionState>()(
           estado: 'lista',
         });
       },
-      cerrar: (m) => set({ sesion: null, ultimaActividad: null, motivoCierre: m }),
+      cerrar: (m) =>
+        set({ sesion: null, ultimaActividad: null, motivoCierre: m, errorCambio: null, generacion: get().generacion + 1 }),
       salir: (m) => {
         get().cerrar(m);
         // Sin esperar y sin error visible: el panel ya quedó cerrado en este navegador.
@@ -127,14 +145,17 @@ export const useSesion = create<SesionState>()(
         const { sesion } = get();
         const destino = sesion?.conjuntos.find((c) => c.slug === slug);
         if (!sesion || !destino) return false;
-        set({ errorCambio: null });
+        const generacion = get().generacion + 1;
+        set({ errorCambio: null, generacion });
         try {
           const nueva = await authService.cambiarConjunto(destino.id);
+          if (get().generacion !== generacion) return false;
           const ahora = Date.now();
           set({ sesion: { ...nueva, ultimaActividad: ahora }, ultimaActividad: ahora });
           return true;
         } catch (e) {
-          set({ errorCambio: e instanceof ErrorAuth ? e.codigo : 'RED' });
+          if (get().generacion !== generacion) return false;
+          set({ errorCambio: { slug, codigo: e instanceof ErrorAuth ? e.codigo : 'RED' } });
           return false;
         }
       },
@@ -152,7 +173,7 @@ export const useSesion = create<SesionState>()(
         }
         if (p.ultimaActividad === null) {
           // Otra pestaña cerró la sesión: esta cierra localmente con el mismo motivo.
-          set({ sesion: null, ultimaActividad: null, motivoCierre: p.motivoCierre ?? 'manual' });
+          set({ sesion: null, ultimaActividad: null, motivoCierre: p.motivoCierre ?? 'manual', generacion: get().generacion + 1 });
         } else if (p.ultimaActividad > sesion.ultimaActividad) {
           set({ sesion: { ...sesion, ultimaActividad: p.ultimaActividad }, ultimaActividad: p.ultimaActividad });
         }

@@ -246,6 +246,14 @@ describe('LoginPage · paso 2', () => {
     await waitFor(() => expect(campoCodigo()).toHaveFocus());
   });
 
+  it('mientras la sesión se rehidrata muestra el estado de carga y no el formulario', async () => {
+    useSesion.setState({ estado: 'cargando' });
+    montar();
+    await new Promise((res) => setTimeout(res, 50));
+    expect(screen.getByRole('status', { name: /cargando/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Inicia sesión' })).not.toBeInTheDocument();
+  });
+
   it('muestra el código de demostración con servicios simulados (usaMock)', async () => {
     const { user } = montar();
     await pasarAlPaso2(user);

@@ -237,6 +237,21 @@ describe('useInactividad', () => {
       expect(useSesion.getState().motivoCierre).toBe('inactividad');
     });
 
+    it('una respuesta null tardía no cierra una sesión distinta de la que preguntó', async () => {
+      let resolver!: (v: Sesion | null) => void;
+      vi.spyOn(authService, 'sesion').mockReturnValue(new Promise((r) => (resolver = r)));
+      renderHook(() => useInactividad());
+      avanzar(TOPE_AVISO_SERVIDOR_MS);
+      disparar('pointermove');
+      act(() => useSesion.getState().cerrar('manual'));
+      act(() => useSesion.getState().iniciar(crearSesion()));
+      await act(async () => {
+        resolver(null);
+        await Promise.resolve();
+      });
+      expect(useSesion.getState().sesion).not.toBeNull();
+    });
+
     it('si el servidor falla por red, la sesión local sigue abierta', async () => {
       vi.spyOn(authService, 'sesion').mockRejectedValue(new Error('red'));
       renderHook(() => useInactividad());

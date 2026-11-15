@@ -59,9 +59,12 @@ export function useInactividad(): {
   const avisarServidor = useCallback((ahora: number) => {
     if (ahora - ultimoAvisoRef.current < TOPE_AVISO_SERVIDOR_MS) return;
     ultimoAvisoRef.current = ahora;
+    const { generacion } = useSesion.getState();
     authService.sesion().then(
       (remota) => {
-        if (remota === null && useSesion.getState().sesion) useSesion.getState().cerrar('inactividad');
+        const actual = useSesion.getState();
+        // Una respuesta tardía no cierra una sesión distinta de la que preguntó.
+        if (remota === null && actual.sesion && actual.generacion === generacion) actual.cerrar('inactividad');
       },
       () => undefined, // Sin red no se cierra: el reloj local sigue mandando.
     );

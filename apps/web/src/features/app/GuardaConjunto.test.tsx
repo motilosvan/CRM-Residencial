@@ -71,7 +71,7 @@ beforeEach(() => {
     const destino = actual.conjuntos.find((c) => c.id === id)!;
     return { ...actual, conjuntoActivo: destino };
   });
-  useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null, errorCambio: null });
+  useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null, errorCambio: null, generacion: 0 });
   usePreferencias.setState({ ultimoConjuntoSlug: null });
 });
 
@@ -125,6 +125,17 @@ describe('GuardaConjunto', () => {
     expect(await screen.findByRole('heading', { name: 'Inicio' })).toBeInTheDocument();
     expect(useSesion.getState().sesion?.conjuntoActivo.slug).toBe('otro');
     expect(cambiarConjuntoSrv).toHaveBeenCalledTimes(2);
+  });
+
+  it('un error de cambio de otro slug no muestra 403 para este', async () => {
+    useSesion.setState({
+      sesion: sesionDe(propio, [propio, otro]),
+      errorCambio: { slug: 'ajeno-previo', codigo: 'SIN_MEMBRESIA' },
+    });
+    cambiarConjuntoSrv.mockImplementation(() => new Promise(() => {}));
+    montar('/app/otro/inicio');
+    await new Promise((res) => setTimeout(res, 20));
+    expect(screen.queryByRole('heading', { name: /sin acceso/i })).not.toBeInTheDocument();
   });
 
   it('slug inexistente muestra 404 en sitio', async () => {

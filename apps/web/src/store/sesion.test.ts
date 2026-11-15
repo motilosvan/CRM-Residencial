@@ -25,7 +25,7 @@ function crearSesion(ultimaActividad = AHORA): Sesion {
 
 function reiniciar() {
   localStorage.clear();
-  useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null, errorCambio: null });
+  useSesion.setState({ sesion: null, estado: 'lista', motivoCierre: null, ultimaActividad: null, errorCambio: null, generacion: 0 });
   usePreferencias.setState({ ultimoConjuntoSlug: null });
 }
 
@@ -138,7 +138,7 @@ describe('useSesion', () => {
       useSesion.getState().iniciar(crearSesion());
       const antes = useSesion.getState().sesion;
       await expect(useSesion.getState().cambiarConjunto('robles')).resolves.toBe(false);
-      expect(useSesion.getState().errorCambio).toBe(codigo);
+      expect(useSesion.getState().errorCambio).toEqual({ slug: 'robles', codigo });
       expect(useSesion.getState().sesion).toEqual(antes);
     });
   });
@@ -202,6 +202,83 @@ describe('useSesion', () => {
       useSesion.setState({ estado: 'cargando', ultimaActividad: AHORA - 5 * 60_000, motivoCierre: 'manual' });
       await useSesion.getState().rehidratar();
       expect(useSesion.getState().motivoCierre).toBe('manual');
+    });
+  });
+
+  describe('respuestas tardías', () => {
+    function diferida<T>() {
+      let resolver!: (v: T) => void;
+      let rechazar!: (e: unknown) => void;
+      const promesa = new Promise<T>((res, rej) => {
+        resolver = res;
+        rechazar = rej;
+      });
+      return { promesa, resolver, rechazar };
+    }
+
+    it('iniciar durante un rehidratar en vuelo que resuelve null conserva la sesión', async () => {
+      const d = diferida<Sesion | null>();
+      vi.spyOn(authService, 'sesion').mockReturnValue(d.promesa);
+      useSesion.setState({ estado: 'cargando' });
+      const pendiente = useSesion.getState().rehidratar();
+      useSesion.getState().iniciar(crearSesion());
+      d.resolver(null);
+      await pendiente;
+      expect(useSesion.getState().sesion).not.toBeNull();
+      expect(useSesion.getState().estado).toBe('lista');
+      expect(useSesion.getState().motivoCierre).toBeNull();
+    });
+
+    it('cerrar durante un cambio de conjunto en vuelo no resucita la sesión', async () => {
+      const base = crearSesion();
+      const d = diferida<Sesion>();
+      vi.spyOn(authService, 'cambiarConjunto').mockReturnValue(d.promesa);
+      vi.spyOn(authService, 'salir').mockResolvedValue();
+      useSesion.getState().iniciar(base);
+      const pendiente = useSesion.getState().cambiarConjunto('robles');
+      useSesion.getState().salir('manual');
+      d.resolver({ ...base, conjuntoActivo: base.conjuntos[1] });
+      await expect(pendiente).resolves.toBe(false);
+      expect(useSesion.getState().sesion).toBeNull();
+      expect(useSesion.getState().errorCambio).toBeNull();
+    });
+
+    it('un error tardío de un cambio cerrado no escribe errorCambio', async () => {
+      const d = diferida<Sesion>();
+      vi.spyOn(authService, 'cambiarConjunto').mockReturnValue(d.promesa);
+      useSesion.getState().iniciar(crearSesion());
+      const pendiente = useSesion.getState().cambiarConjunto('robles');
+      useSesion.getState().cerrar('manual');
+      d.rechazar(new ErrorAuth('SIN_MEMBRESIA'));
+      await expect(pendiente).resolves.toBe(false);
+      expect(useSesion.getState().errorCambio).toBeNull();
+    });
+
+    it('dos cambios A y B: si A resuelve después de B queda B', async () => {
+      const base = crearSesion();
+      const c3 = { id: 'c3', slug: 'pinos', nombre: 'Pinos' };
+      const sesion3 = { ...base, conjuntos: [...base.conjuntos, c3] };
+      const a = diferida<Sesion>();
+      const b = diferida<Sesion>();
+      const cambiar = vi.spyOn(authService, 'cambiarConjunto');
+      cambiar.mockReturnValueOnce(a.promesa).mockReturnValueOnce(b.promesa);
+      useSesion.getState().iniciar(sesion3);
+      const pA = useSesion.getState().cambiarConjunto('robles');
+      const pB = useSesion.getState().cambiarConjunto('pinos');
+      b.resolver({ ...sesion3, conjuntoActivo: c3 });
+      await expect(pB).resolves.toBe(true);
+      a.resolver({ ...sesion3, conjuntoActivo: sesion3.conjuntos[1] });
+      await expect(pA).resolves.toBe(false);
+      expect(useSesion.getState().sesion?.conjuntoActivo.slug).toBe('pinos');
+    });
+
+    it('iniciar y cerrar limpian errorCambio', () => {
+      useSesion.setState({ errorCambio: { slug: 'x', codigo: 'RED' } });
+      useSesion.getState().iniciar(crearSesion());
+      expect(useSesion.getState().errorCambio).toBeNull();
+      useSesion.setState({ errorCambio: { slug: 'x', codigo: 'RED' } });
+      useSesion.getState().cerrar('manual');
+      expect(useSesion.getState().errorCambio).toBeNull();
     });
   });
 
