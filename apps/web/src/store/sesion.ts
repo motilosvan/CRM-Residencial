@@ -82,6 +82,9 @@ function leerPersistido(): Persistido {
   }
 }
 
+/** Rehidratación en vuelo: una segunda llamada (StrictMode) comparte su promesa. */
+let rehidratando: Promise<void> | null = null;
+
 export const useSesion = create<SesionState>()(
   persist(
     (set, get) => ({
@@ -102,7 +105,9 @@ export const useSesion = create<SesionState>()(
           generacion: get().generacion + 1,
         });
       },
-      rehidratar: async () => {
+      rehidratar: () => {
+        if (rehidratando) return rehidratando;
+        const tarea = (async () => {
         const previa = get().ultimaActividad;
         const generacion = get().generacion + 1;
         set({ generacion });
@@ -129,6 +134,12 @@ export const useSesion = create<SesionState>()(
           motivoCierre: vencida ? 'inactividad' : get().motivoCierre,
           estado: 'lista',
         });
+        })();
+        const compartida = tarea.finally(() => {
+          rehidratando = null;
+        });
+        rehidratando = compartida;
+        return compartida;
       },
       cerrar: (m) =>
         set({ sesion: null, ultimaActividad: null, motivoCierre: m, errorCambio: null, generacion: get().generacion + 1 }),

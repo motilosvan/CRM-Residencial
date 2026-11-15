@@ -127,15 +127,16 @@ describe('GuardaConjunto', () => {
     expect(cambiarConjuntoSrv).toHaveBeenCalledTimes(2);
   });
 
-  it('un error de cambio de otro slug no muestra 403 para este', async () => {
-    useSesion.setState({
-      sesion: sesionDe(propio, [propio, otro]),
-      errorCambio: { slug: 'ajeno-previo', codigo: 'SIN_MEMBRESIA' },
-    });
+  it('un error de cambio de otro slug no muestra 403 ni reintento para este', async () => {
+    useSesion.setState({ sesion: sesionDe(propio, [propio, otro]) });
     cambiarConjuntoSrv.mockImplementation(() => new Promise(() => {}));
     montar('/app/otro/inicio');
+    // El cambio hacia «otro» sigue en vuelo; llega un error que pertenece a otro slug.
+    await waitFor(() => expect(cambiarConjuntoSrv).toHaveBeenCalled());
+    act(() => useSesion.setState({ errorCambio: { slug: 'ajeno-previo', codigo: 'SIN_MEMBRESIA' } }));
     await new Promise((res) => setTimeout(res, 20));
     expect(screen.queryByRole('heading', { name: /sin acceso/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument();
   });
 
   it('slug inexistente muestra 404 en sitio', async () => {

@@ -282,6 +282,30 @@ describe('useSesion', () => {
     });
   });
 
+  describe('rehidratar solapado (StrictMode)', () => {
+    it('dos llamadas seguidas consultan al servidor una vez y no adelantan lista', async () => {
+      let resolver!: (v: Sesion | null) => void;
+      const sesion = vi.spyOn(authService, 'sesion').mockReturnValue(new Promise((r) => (resolver = r)));
+      useSesion.setState({ estado: 'cargando' });
+      const p1 = useSesion.getState().rehidratar();
+      const p2 = useSesion.getState().rehidratar();
+      expect(sesion).toHaveBeenCalledTimes(1);
+      await Promise.resolve();
+      expect(useSesion.getState().estado).toBe('cargando');
+      resolver(crearSesion());
+      await Promise.all([p1, p2]);
+      expect(useSesion.getState().sesion).not.toBeNull();
+      expect(useSesion.getState().estado).toBe('lista');
+    });
+
+    it('tras terminar una rehidratación, una llamada nueva vuelve a consultar', async () => {
+      const sesion = vi.spyOn(authService, 'sesion').mockResolvedValue(null);
+      await useSesion.getState().rehidratar();
+      await useSesion.getState().rehidratar();
+      expect(sesion).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('lectura de lo persistido', () => {
     function guardar(state: unknown) {
       localStorage.setItem('mailflow.sesion', JSON.stringify({ state, version: 0 }));
