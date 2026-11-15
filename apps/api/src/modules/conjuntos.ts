@@ -14,7 +14,7 @@ export interface ConjuntoPublico {
   paleta?: { primario: string; acento: string; secundario?: string };
 }
 
-interface FilaConjunto {
+export interface FilaConjunto {
   idConjunto: number;
   slug: string;
   nombre: string;
@@ -24,7 +24,7 @@ interface FilaConjunto {
   colorSecundario: string | null;
 }
 
-function aPublico(f: FilaConjunto): ConjuntoPublico {
+export function aPublico(f: FilaConjunto): ConjuntoPublico {
   const c: ConjuntoPublico = { id: String(f.idConjunto), slug: f.slug, nombre: f.nombre };
   if (f.logoUrl) c.logoUrl = f.logoUrl;
   // Una paleta a medias no se envía: el panel usa la de MailFlow.
