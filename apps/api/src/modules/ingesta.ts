@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { clasificar, type Categoria } from '../domain/clasificador.js';
 import { priorizar, type Prioridad } from '../domain/priorizador.js';
 import { sqlErrorNumber, withTx, type Tx } from '../db/withTx.js';
+import { ConflictError, NotFound } from '../errors.js';
+import { SLUG_CONJUNTO_INICIAL } from './conjuntos.js';
 import { paso, type Hooks } from './hooks.js';
 
 /** Remitente de reserva cuando el `From` no es una dirección utilizable: el correo se guarda igual. */
@@ -47,6 +49,8 @@ export const CorreoEntranteSchema = z.object({
    * el clasificador, para no bloquear el buzón (regla 8). Un humano lo reclasifica después (T4).
    */
   sinClasificar: z.boolean().default(false),
+  /** Conjunto del buzón. Sin él, el conjunto inicial (los datos y pruebas previos a 0007). */
+  idConjunto: z.number().int().positive().optional(),
   /** T6: avance del checkpoint IMAP, en la MISMA transacción que el correo. */
   checkpoint: z
     .object({
@@ -83,26 +87,56 @@ function clasificarSeguro(asunto: string, cuerpo: string): { categoria: Categori
 }
 
 /**
+ * Conjunto de la ingesta: el indicado o, si no se indica, el inicial. Debe existir: un id inventado
+ * no puede guardar correos (lo impediría la FK, pero así el error es explícito).
+ */
+async function resolverConjunto(tx: Tx, idConjunto: number | undefined): Promise<number> {
+  const r = await tx
+    .request()
+    .input('idConjunto', sql.Int, idConjunto ?? null)
+    .input('slugInicial', sql.VarChar(80), SLUG_CONJUNTO_INICIAL)
+    .query<{ idConjunto: number }>(
+      `SELECT idConjunto FROM CONJUNTOS
+        WHERE idConjunto = COALESCE(@idConjunto, (SELECT idConjunto FROM CONJUNTOS WHERE slug = @slugInicial))`,
+    );
+  const fila = r.recordset[0];
+  if (!fila) throw new NotFound(idConjunto === undefined ? 'Falta el conjunto inicial (¿se aplicó 0007?)' : 'El conjunto no existe');
+  return fila.idConjunto;
+}
+
+/**
  * Upsert del checkpoint. UPDLOCK+HOLDLOCK cierra la carrera de la primera inserción de una cuenta
  * (sin ellos, dos T1 simultáneas podían chocar en la PK y perder el correo). Si cambia UIDVALIDITY
  * los UID del buzón se reinician: se reinicia también ultimoUid (la idempotencia absorbe relecturas).
+ * Una cuenta pertenece a un solo conjunto: si ya está en otro, el INSERT choca con la PK `cuenta` y
+ * toda la transacción (también el correo) se revierte.
  */
-async function avanzarCheckpoint(tx: Tx, c: NonNullable<z.output<typeof CorreoEntranteSchema>['checkpoint']>) {
-  await tx
-    .request()
-    .input('cuenta', sql.NVarChar(255), c.cuenta)
-    .input('validity', sql.BigInt, c.uidValidity)
-    .input('uid', sql.BigInt, c.uid)
-    .query(
-      `UPDATE GATEWAY_CHECKPOINT WITH (UPDLOCK, HOLDLOCK)
-          SET ultimoUid = CASE WHEN uidValidity <> @validity THEN @uid
-                               WHEN @uid > ultimoUid THEN @uid
-                               ELSE ultimoUid END,
-              uidValidity = @validity, actualizadoEn = SYSUTCDATETIME()
-        WHERE cuenta = @cuenta;
-       IF @@ROWCOUNT = 0
-         INSERT INTO GATEWAY_CHECKPOINT (cuenta, uidValidity, ultimoUid) VALUES (@cuenta, @validity, @uid);`,
-    );
+async function avanzarCheckpoint(
+  tx: Tx,
+  c: NonNullable<z.output<typeof CorreoEntranteSchema>['checkpoint']>,
+  idConjunto: number,
+) {
+  try {
+    await tx
+      .request()
+      .input('cuenta', sql.NVarChar(255), c.cuenta)
+      .input('idConjunto', sql.Int, idConjunto)
+      .input('validity', sql.BigInt, c.uidValidity)
+      .input('uid', sql.BigInt, c.uid)
+      .query(
+        `UPDATE GATEWAY_CHECKPOINT WITH (UPDLOCK, HOLDLOCK)
+            SET ultimoUid = CASE WHEN uidValidity <> @validity THEN @uid
+                                 WHEN @uid > ultimoUid THEN @uid
+                                 ELSE ultimoUid END,
+                uidValidity = @validity, actualizadoEn = SYSUTCDATETIME()
+          WHERE cuenta = @cuenta AND idConjunto = @idConjunto;
+         IF @@ROWCOUNT = 0
+           INSERT INTO GATEWAY_CHECKPOINT (cuenta, idConjunto, uidValidity, ultimoUid) VALUES (@cuenta, @idConjunto, @validity, @uid);`,
+      );
+  } catch (err) {
+    if (esDuplicado(err)) throw new ConflictError('La cuenta del gateway ya está asociada a otro conjunto');
+    throw err;
+  }
 }
 
 /**
@@ -121,10 +155,12 @@ export async function ingestarCorreo(
     : clasificarSeguro(c.asunto, c.cuerpo);
 
   return withTx(pool, async (tx) => {
+    const idConjunto = await resolverConjunto(tx, c.idConjunto);
     let insertado;
     try {
       insertado = await tx
         .request()
+        .input('idConjunto', sql.Int, idConjunto)
         .input('messageId', sql.NVarChar(255), c.messageId)
         .input('imapUid', sql.BigInt, c.imapUid ?? null)
         .input('remitente', sql.NVarChar(320), c.remitente)
@@ -132,15 +168,16 @@ export async function ingestarCorreo(
         .input('cuerpo', sql.NVarChar(sql.MAX), c.cuerpo)
         .input('recibidoEn', sql.DateTime2, c.recibidoEn ?? new Date())
         .query<{ idCorreo: number; idResidente: number | null }>(
-          `INSERT INTO CORREOS (idResidente, remitente, asunto, cuerpo, fechaRecepcion, messageId, imapUid)
+          `INSERT INTO CORREOS (idConjunto, idResidente, remitente, asunto, cuerpo, fechaRecepcion, messageId, imapUid)
            OUTPUT inserted.idCorreo, inserted.idResidente
-           VALUES ((SELECT idResidente FROM RESIDENTES WHERE correo = @remitente),
+           VALUES (@idConjunto,
+                   (SELECT idResidente FROM RESIDENTES WHERE idConjunto = @idConjunto AND correo = @remitente),
                    @remitente, @asunto, @cuerpo, @recibidoEn, @messageId, @imapUid)`,
         );
     } catch (err) {
       if (!esDuplicado(err)) throw err;
       // Ya existía: el INSERT fallido no dejó nada; solo se avanza el checkpoint.
-      if (c.checkpoint) await avanzarCheckpoint(tx, c.checkpoint);
+      if (c.checkpoint) await avanzarCheckpoint(tx, c.checkpoint, idConjunto);
       return { duplicado: true } as const;
     }
     const { idCorreo, idResidente } = insertado.recordset[0]!;
@@ -180,7 +217,7 @@ export async function ingestarCorreo(
       );
     await paso(hooks, 'historial');
 
-    if (c.checkpoint) await avanzarCheckpoint(tx, c.checkpoint);
+    if (c.checkpoint) await avanzarCheckpoint(tx, c.checkpoint, idConjunto);
     await paso(hooks, 'checkpoint');
 
     return { duplicado: false, idCorreo, idSolicitud, categoria, prioridad, idResidente } as const;

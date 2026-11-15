@@ -2,6 +2,7 @@ import sql from 'mssql';
 import { CORREOS_EJEMPLO } from '../../test/fixtures/correos.js';
 import { withTx } from '../db/withTx.js';
 import { asignar } from '../modules/asignaciones.js';
+import { SLUG_CONJUNTO_INICIAL } from '../modules/conjuntos.js';
 import { ingestarCorreo } from '../modules/ingesta.js';
 import { cambiarEstado } from '../modules/solicitudes.js';
 
@@ -43,13 +44,20 @@ export async function sembrarDemo(pool: sql.ConnectionPool): Promise<boolean> {
   const ids = await withTx(pool, async (tx) => {
     for (const [nombre, unidad, correo] of RESIDENTES) {
       await tx.request().input('n', sql.NVarChar(100), nombre).input('u', sql.VarChar(20), unidad).input('c', sql.NVarChar(320), correo)
-        .query('INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES (@n, @u, @c)');
+        .input('slug', sql.VarChar(80), SLUG_CONJUNTO_INICIAL)
+        .query(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo)
+                SELECT idConjunto, @n, @u, @c FROM CONJUNTOS WHERE slug = @slug`);
     }
     const out: number[] = [];
     for (const [nombre, rol, correo] of USUARIOS) {
       const r = await tx.request().input('n', sql.NVarChar(100), nombre).input('r', sql.VarChar(30), rol).input('c', sql.NVarChar(320), correo)
         .query<{ id: number }>('INSERT INTO USUARIOS (nombre, rol, correo, activo) OUTPUT inserted.idUsuario AS id VALUES (@n, @r, @c, 1)');
-      out.push(r.recordset[0]!.id);
+      const id = r.recordset[0]!.id;
+      // La membresía en el conjunto es la que habilita asignar (trigger de 0007).
+      await tx.request().input('id', sql.Int, id).input('r', sql.VarChar(30), rol).input('slug', sql.VarChar(80), SLUG_CONJUNTO_INICIAL)
+        .query(`INSERT INTO USUARIO_CONJUNTOS (idUsuario, idConjunto, rol, activo)
+                SELECT @id, idConjunto, @r, 1 FROM CONJUNTOS WHERE slug = @slug`);
+      out.push(id);
     }
     return out;
   });

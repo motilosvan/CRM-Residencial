@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, idConjuntoInicial, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { listarConjuntos } from './conjuntos.js';
 import { ingestarCorreo, REMITENTE_DESCONOCIDO, truncarUtf16 } from './ingesta.js';
 
 let db: TestDb;
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_ing');
-  await db.q(`INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES ('Ana', 'T1-101', 'ana@mail.com')`);
+  await db.q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, 'Ana', 'T1-101', 'ana@mail.com')`);
 });
 afterAll(async () => db.close());
 
@@ -171,5 +172,79 @@ describe('T1 · ingestarCorreo', () => {
       const cp = await db.q<{ ultimoUid: string }>(`SELECT ultimoUid FROM GATEWAY_CHECKPOINT WHERE cuenta = '${cuenta}'`);
       expect(Number(cp[0]?.ultimoUid)).toBe(8);
     }
+  });
+});
+
+describe('T1 · multi-conjunto', () => {
+  let inicial: number;
+  let otro: number;
+
+  beforeAll(async () => {
+    inicial = await idConjuntoInicial(db);
+    const r = await db.q<{ id: number }>(`
+      INSERT INTO CONJUNTOS (slug, nombre) OUTPUT inserted.idConjunto AS id VALUES ('torres-del-norte', N'Torres del Norte');`);
+    otro = r[0]!.id;
+    // Beto está registrado solo en el otro conjunto.
+    await db.q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${otro}, N'Beto', 'N-1', 'beto@mail.com')`);
+  });
+
+  const conjuntoDe = (idCorreo: number) =>
+    db.q<{ idConjunto: number }>(`SELECT idConjunto FROM CORREOS WHERE idCorreo = ${idCorreo}`).then((r) => r[0]?.idConjunto);
+
+  it('sin idConjunto el correo queda en el conjunto inicial', async () => {
+    const r = await ingestarCorreo(db.pool, { messageId: '<mc-defecto>', remitente: 'ana@mail.com', asunto: 'Hola' });
+    if (r.duplicado) throw new Error('inesperado');
+    expect(await conjuntoDe(r.idCorreo)).toBe(inicial);
+    expect(r.idResidente).toBe(1);
+  });
+
+  it('el mismo messageId en dos conjuntos crea dos solicitudes; repetido en el mismo es duplicado', async () => {
+    const a = await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@mail.com', idConjunto: inicial });
+    const b = await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@mail.com', idConjunto: otro });
+    expect(a.duplicado).toBe(false);
+    expect(b.duplicado).toBe(false);
+    if (a.duplicado || b.duplicado) return;
+    expect(a.idSolicitud).not.toBe(b.idSolicitud);
+    expect(await conjuntoDe(b.idCorreo)).toBe(otro);
+    expect(await ingestarCorreo(db.pool, { messageId: '<mc-compartido>', remitente: 'x@mail.com', idConjunto: otro })).toEqual({ duplicado: true });
+  });
+
+  it('el residente se vincula solo si su correo está registrado en ese conjunto', async () => {
+    const enOtro = await ingestarCorreo(db.pool, { messageId: '<mc-beto-1>', remitente: 'beto@mail.com', idConjunto: otro });
+    const enInicial = await ingestarCorreo(db.pool, { messageId: '<mc-beto-2>', remitente: 'beto@mail.com', idConjunto: inicial });
+    const anaEnOtro = await ingestarCorreo(db.pool, { messageId: '<mc-ana-otro>', remitente: 'ana@mail.com', idConjunto: otro });
+    expect(enOtro).toMatchObject({ duplicado: false, idResidente: expect.any(Number) });
+    expect(enInicial).toMatchObject({ duplicado: false, idResidente: null });
+    expect(anaEnOtro).toMatchObject({ duplicado: false, idResidente: null });
+  });
+
+  it('un checkpoint cuya cuenta pertenece a otro conjunto hace fallar la transacción sin guardar el correo', async () => {
+    const cuenta = 'compartida@gmail.com/INBOX';
+    await ingestarCorreo(db.pool, { messageId: '<mc-cp-1>', remitente: 'ana@mail.com', idConjunto: inicial, checkpoint: { cuenta, uidValidity: 1, uid: 1 } });
+    const antes = await conteos();
+    await expect(
+      ingestarCorreo(db.pool, { messageId: '<mc-cp-2>', remitente: 'ana@mail.com', idConjunto: otro, checkpoint: { cuenta, uidValidity: 1, uid: 2 } }),
+    ).rejects.toThrow(/otro conjunto/);
+    expect(await conteos()).toEqual(antes);
+    const cp = await db.q<{ idConjunto: number; ultimoUid: string }>(`SELECT idConjunto, ultimoUid FROM GATEWAY_CHECKPOINT WHERE cuenta = '${cuenta}'`);
+    expect(cp).toEqual([{ idConjunto: inicial, ultimoUid: '1' }]);
+  });
+
+  it('un conjunto inexistente no recibe correos', async () => {
+    await expect(ingestarCorreo(db.pool, { messageId: '<mc-nada>', remitente: 'ana@mail.com', idConjunto: 999_999 })).rejects.toThrow(/conjunto/i);
+  });
+
+  it('listarConjuntos devuelve los activos ordenados por nombre, con paleta solo si hay primario y acento', async () => {
+    await db.q(`INSERT INTO CONJUNTOS (slug, nombre, colorPrimario, colorAcento, activo) VALUES ('cerrado', N'Antiguo', '#000000', '#FFFFFF', 0)`);
+    const lista = await listarConjuntos(db.pool);
+    expect(lista).toEqual([
+      {
+        id: String(inicial),
+        slug: 'parque-central-occidente',
+        nombre: 'Parque Central de Occidente',
+        paleta: { primario: '#355E3B', acento: '#D6A64F', secundario: '#789653' },
+      },
+      { id: String(otro), slug: 'torres-del-norte', nombre: 'Torres del Norte' },
+    ]);
   });
 });

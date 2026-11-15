@@ -7,6 +7,8 @@ import { aCorreoEntrante, correoDeRespaldo, correoMinimo, correoNoDescargable, t
 export interface OpcionesSincronizacion {
   /** Clave del checkpoint (usuario/buzón). */
   cuenta: string;
+  /** Conjunto al que pertenece el buzón: cada correo (y el checkpoint) se guarda en él. */
+  idConjunto: number;
   diasIniciales: number;
   maxPorCiclo: number;
   maxIntentos: number;
@@ -182,7 +184,7 @@ export async function sincronizar(
 
       let r: ResultadoIngesta;
       try {
-        r = await ingestar(pool, correo);
+        r = await ingestar(pool, { ...correo, idConjunto: opts.idConjunto });
       } catch (err) {
         if (!esFalloDeInfraestructura(err)) intentos.sumar(clave, describirError(err));
         throw new ErrorSincronizacion(uid, err);

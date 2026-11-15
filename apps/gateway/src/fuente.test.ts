@@ -50,6 +50,7 @@ vi.mock('imapflow', () => ({
 const cfg: ConfigGateway = {
   host: 'imap.prueba', port: 993, usuario: 'buzon@gmail.com', contrasena: 'x', buzon: 'INBOX',
   cuenta: 'buzon@gmail.com/INBOX', intervaloS: 45, diasIniciales: 7, maxPorCiclo: 50, maxIntentos: 3, marcarLeido: false,
+  conjuntoSlug: 'parque-central-occidente',
 };
 
 /** Una sesión quedó cerrada si se pidió LOGOUT (o, si este falló, se cortó el socket). */

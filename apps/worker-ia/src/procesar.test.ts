@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ingestarCorreo } from '../../api/src/modules/ingesta.js';
-import { setupTestDb, type TestDb } from '../../api/test/helpers/testDb.js';
+import { CONJ_SQL, setupTestDb, type TestDb } from '../../api/test/helpers/testDb.js';
 import { LIMITE_TEXTO, procesarPendientes } from './procesar.js';
 import { ErrorConfiguracionIA, ErrorCuota, ErrorRespuestaIA, ErrorTemporalIA, type EntradaIA, type ProveedorIA } from './proveedor.js';
 
@@ -9,7 +9,7 @@ let n = 0;
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_ia');
-  await db.q(`INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES (N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
+  await db.q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
 });
 afterAll(async () => db.close());
 beforeEach(async () => {

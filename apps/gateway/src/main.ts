@@ -10,6 +10,8 @@
  */
 import { dbConfigFromEnv } from '../../api/src/config.js';
 import { crearPool } from '../../api/src/db/pool.js';
+import { NotFound } from '../../api/src/errors.js';
+import { idConjuntoPorSlug } from '../../api/src/modules/conjuntos.js';
 import { cargarConfig, type ConfigGateway } from './config.js';
 import { esErrorDeAutenticacion, esErrorDeCertificado, FuenteImap } from './fuente.js';
 import { describirError, ErrorSincronizacion, Intentos, sincronizar } from './sincronizar.js';
@@ -27,6 +29,16 @@ try {
 }
 
 const pool = await crearPool(dbConfigFromEnv(), { max: 2 });
+
+let idConjunto: number;
+try {
+  idConjunto = await idConjuntoPorSlug(pool, cfg.conjuntoSlug);
+} catch (err) {
+  if (!(err instanceof NotFound)) throw err;
+  console.error(`No existe un conjunto activo con slug "${cfg.conjuntoSlug}". Revise IMAP_CONJUNTO_SLUG en .env.`);
+  await pool.close();
+  process.exit(1);
+}
 const intentos = new Intentos();
 let detener = false;
 let despertar: (() => void) | null = null;
@@ -38,7 +50,7 @@ for (const senal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-log(`Leyendo ${cfg.cuenta} en ${cfg.host}:${cfg.port} cada ${cfg.intervaloS}s` +
+log(`Leyendo ${cfg.cuenta} (conjunto ${cfg.conjuntoSlug}) en ${cfg.host}:${cfg.port} cada ${cfg.intervaloS}s` +
   ` (primera lectura: últimos ${cfg.diasIniciales} días; marcar leídos: ${cfg.marcarLeido ? 'sí' : 'no'})`);
 
 while (!detener) {
@@ -46,6 +58,7 @@ while (!detener) {
   try {
     const r = await sincronizar(pool, new FuenteImap(cfg), {
       cuenta: cfg.cuenta,
+      idConjunto,
       diasIniciales: cfg.diasIniciales,
       maxPorCiclo: cfg.maxPorCiclo,
       maxIntentos: cfg.maxIntentos,

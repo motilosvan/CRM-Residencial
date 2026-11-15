@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SLUG_CONJUNTO_INICIAL } from '../../api/src/modules/conjuntos.js';
 
 /**
  * Configuración del Email Gateway (S3), leída de variables de entorno (ver .env.example).
@@ -27,6 +28,13 @@ const EsquemaConfig = z.object({
   IMAP_MAX_INTENTOS: z.coerce.number().int().min(1).max(20).default(3),
   /** Marcar como leído en Gmail después del COMMIT. Por defecto no se toca el buzón (se abre en solo lectura). */
   IMAP_MARCAR_LEIDO: booleano,
+  /** Conjunto residencial al que pertenece este buzón (slug de CONJUNTOS). */
+  IMAP_CONJUNTO_SLUG: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'debe ser un slug (minúsculas, números y guiones)')
+    .max(80)
+    .default(SLUG_CONJUNTO_INICIAL),
 });
 
 export interface ConfigGateway {
@@ -42,6 +50,8 @@ export interface ConfigGateway {
   maxPorCiclo: number;
   maxIntentos: number;
   marcarLeido: boolean;
+  /** Slug del conjunto del buzón; `main.ts` lo resuelve a idConjunto al arrancar. */
+  conjuntoSlug: string;
 }
 
 export function cargarConfig(env: NodeJS.ProcessEnv = process.env): ConfigGateway {
@@ -66,5 +76,6 @@ export function cargarConfig(env: NodeJS.ProcessEnv = process.env): ConfigGatewa
     maxPorCiclo: e.IMAP_MAX_POR_CICLO,
     maxIntentos: e.IMAP_MAX_INTENTOS,
     marcarLeido: e.IMAP_MARCAR_LEIDO,
+    conjuntoSlug: e.IMAP_CONJUNTO_SLUG,
   };
 }

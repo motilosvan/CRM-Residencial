@@ -1,16 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { leerCheckpoint } from '../../api/src/modules/consultas.js';
 import { ingestarCorreo, type CorreoEntrante } from '../../api/src/modules/ingesta.js';
-import { setupTestDb, type TestDb } from '../../api/test/helpers/testDb.js';
+import { idConjuntoInicial, setupTestDb, type TestDb } from '../../api/test/helpers/testDb.js';
 import { BuzonFalso } from '../test/buzonFalso.js';
 import { mensajeCrudo } from '../test/mensajes.js';
 import { correoNoDescargable } from './parseo.js';
 import { ErrorSincronizacion, Intentos, sincronizar, type OpcionesSincronizacion } from './sincronizar.js';
 
 let db: TestDb;
+let idConjunto: number;
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_gw');
+  idConjunto = await idConjuntoInicial(db);
 });
 afterAll(async () => db.close());
 
@@ -21,6 +23,7 @@ let nCuenta = 0;
 /** Cada prueba usa su propia cuenta (checkpoint independiente) sobre la misma BD. */
 const opciones = (extra: Partial<OpcionesSincronizacion> = {}): OpcionesSincronizacion => ({
   cuenta: `prueba${++nCuenta}@gmail.com/INBOX`,
+  idConjunto,
   diasIniciales: 7,
   maxPorCiclo: 50,
   maxIntentos: 3,
@@ -243,5 +246,20 @@ describe('Gateway · sincronizar', () => {
     };
     expect(await sincronizar(db.pool, b.fuente(), opciones({ parsear }))).toMatchObject({ revisados: 1, respaldos: 1 });
     expect(await categoriaDe('<t7-roto@x>')).toBe('SIN_CLASIFICAR');
+  });
+
+  it('los correos quedan en el conjunto indicado y el checkpoint también', async () => {
+    const r = await db.q<{ id: number }>(`INSERT INTO CONJUNTOS (slug, nombre) OUTPUT inserted.idConjunto AS id VALUES ('gw-otro', N'Otro')`);
+    const otro = r[0]!.id;
+    const b = new BuzonFalso();
+    b.agregar(mensajeCrudo({ id: '<gw-conj-a@x>' }), haceDias(1));
+    b.agregar(mensajeCrudo({ id: '<gw-conj-b@x>' }), haceDias(1));
+    const o = opciones({ idConjunto: otro });
+
+    expect(await sincronizar(db.pool, b.fuente(), o)).toMatchObject({ revisados: 2, nuevos: 2 });
+    const filas = await db.q<{ idConjunto: number }>(`SELECT idConjunto FROM CORREOS WHERE messageId LIKE '<gw-conj-%'`);
+    expect(filas).toEqual([{ idConjunto: otro }, { idConjunto: otro }]);
+    const cp = await db.q<{ idConjunto: number }>(`SELECT idConjunto FROM GATEWAY_CHECKPOINT WHERE cuenta = '${o.cuenta}'`);
+    expect(cp).toEqual([{ idConjunto: otro }]);
   });
 });

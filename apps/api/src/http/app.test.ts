@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { crearPool } from '../db/pool.js';
 import { ingestarCorreo } from '../modules/ingesta.js';
 import { construirApp } from './app.js';
@@ -12,7 +12,7 @@ const HOST = '127.0.0.1:3000';
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_http');
-  await db.q(`INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES (N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
+  await db.q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
   await ingestarCorreo(db.pool, {
     messageId: '<http-1@mail>', remitente: 'ana@mail.com', asunto: 'Fuga en el baño', cuerpo: 'Hay agua 💧',
     checkpoint: { cuenta: 'buzon@gmail.com/INBOX', uidValidity: 3, uid: 10 },

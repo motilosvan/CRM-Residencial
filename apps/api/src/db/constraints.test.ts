@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate } from './migrate.js';
-import { dropTempDb, runSql, tempDbConfig } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, dropTempDb, runSql, tempDbConfig } from '../../test/helpers/testDb.js';
 
 /**
  * S1-05 — Matriz de constraints. Cada regla de integridad del modelo tiene una
@@ -20,9 +20,10 @@ beforeAll(async () => {
   });
   // Estado base: 1 residente, 2 usuarios, 1 correo, 1 solicitud NUEVA con 1 asignación vigente y su historial.
   await q(`
-    INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES ('Ana', 'T1-101', 'ana@mail.com');
+    INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, 'Ana', 'T1-101', 'ana@mail.com');
     INSERT INTO USUARIOS (nombre, rol, correo) VALUES ('Admin', 'ADMIN', 'admin@c.com'), ('Soporte', 'SOPORTE', 'soporte@c.com');
-    INSERT INTO CORREOS (idResidente, remitente, messageId) VALUES (1, 'ana@mail.com', 'm1');
+    INSERT INTO USUARIO_CONJUNTOS (idUsuario, idConjunto, rol) SELECT idUsuario, ${CONJ_SQL}, rol FROM USUARIOS;
+    INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_SQL}, 1, 'ana@mail.com', 'm1');
     INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) VALUES (1, 1, 1, 1);
     INSERT INTO ASIGNACIONES (idSolicitud, idUsuario, asignadaPor) VALUES (1, 2, 1);
     INSERT INTO HISTORIAL_ESTADOS (idSolicitud, idEstadoAnterior, idEstadoNuevo, idUsuario) VALUES (1, NULL, 1, NULL);
@@ -36,10 +37,10 @@ afterAll(async () => {
 type Case = [descripcion: string, sentencia: string, restriccion: RegExp];
 
 const foreignKeys: Case[] = [
-  ['CORREOS → RESIDENTES', `INSERT INTO CORREOS (idResidente, remitente, messageId) VALUES (999, 'x', 'fk1')`, /FK_Correos_Residentes/],
+  ['CORREOS → RESIDENTES', `INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_SQL}, 999, 'x', 'fk1')`, /FK_Correos_Residentes/],
   ['SOLICITUDES → CORREOS', `INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) VALUES (999, 1, 1, 1)`, /FK_Solicitudes_Correos/],
-  ['SOLICITUDES → CATEGORIAS', `DECLARE @c INT; INSERT INTO CORREOS (remitente, messageId) VALUES ('x', 'fk-cat'); SET @c = SCOPE_IDENTITY(); INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) VALUES (@c, 999, 1, 1)`, /FK_Solicitudes_Categorias/],
-  ['SOLICITUDES → ESTADOS', `DECLARE @c INT; INSERT INTO CORREOS (remitente, messageId) VALUES ('x', 'fk-est'); SET @c = SCOPE_IDENTITY(); INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) VALUES (@c, 1, 999, 1)`, /FK_Solicitudes_Estados/],
+  ['SOLICITUDES → CATEGORIAS', `DECLARE @c INT; INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x', 'fk-cat'); SET @c = SCOPE_IDENTITY(); INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) VALUES (@c, 999, 1, 1)`, /FK_Solicitudes_Categorias/],
+  ['SOLICITUDES → ESTADOS', `DECLARE @c INT; INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x', 'fk-est'); SET @c = SCOPE_IDENTITY(); INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) VALUES (@c, 1, 999, 1)`, /FK_Solicitudes_Estados/],
   ['SOLICITUDES → PRIORIDADES', `UPDATE SOLICITUDES SET idPrioridad = 999 WHERE idSolicitud = 1`, /FK_Solicitudes_Prioridades/],
   ['ASIGNACIONES → SOLICITUDES', `INSERT INTO ASIGNACIONES (idSolicitud, idUsuario, asignadaPor) VALUES (999, 1, 1)`, /FK_Asignaciones_Solicitudes/],
   ['ASIGNACIONES → USUARIOS (responsable)', `INSERT INTO ASIGNACIONES (idSolicitud, idUsuario, asignadaPor, liberadaEn) VALUES (1, 999, 1, SYSUTCDATETIME())`, /FK_Asignaciones_Usuarios/],
@@ -65,8 +66,8 @@ const checks: Case[] = [
 ];
 
 const uniques: Case[] = [
-  ['CORREOS.messageId único (idempotencia)', `INSERT INTO CORREOS (remitente, messageId) VALUES ('x', 'm1')`, /UX_Correos_messageId/],
-  ['RESIDENTES.correo único', `INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES ('Otra', 'T2-1', 'ana@mail.com')`, /UX_Residentes_correo/],
+  ['CORREOS.messageId único (idempotencia)', `INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x', 'm1')`, /UX_Correos_messageId/],
+  ['RESIDENTES.correo único', `INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, 'Otra', 'T2-1', 'ana@mail.com')`, /UX_Residentes_correo/],
   ['USUARIOS.correo único', `INSERT INTO USUARIOS (nombre, rol, correo) VALUES ('Otro', 'ADMIN', 'admin@c.com')`, /UX_Usuarios_correo/],
   ['CATEGORIAS.nombre único', `INSERT INTO CATEGORIAS (nombre) VALUES ('SEGURIDAD')`, /UX_Categorias_nombre/],
   ['ESTADOS.nombre único', `INSERT INTO ESTADOS (nombre) VALUES ('NUEVA')`, /UX_Estados_nombre/],
@@ -77,7 +78,7 @@ const uniques: Case[] = [
 ];
 
 const notNull: Case[] = [
-  ['CORREOS.messageId obligatorio', `INSERT INTO CORREOS (remitente) VALUES ('x')`, /messageId/],
+  ['CORREOS.messageId obligatorio', `INSERT INTO CORREOS (idConjunto, remitente) VALUES (${CONJ_SQL}, 'x')`, /messageId/],
   ['SOLICITUDES.idPrioridad obligatoria', `INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado) VALUES (1, 1, 1)`, /idPrioridad/],
   ['ASIGNACIONES.asignadaPor obligatorio', `INSERT INTO ASIGNACIONES (idSolicitud, idUsuario, liberadaEn) VALUES (1, 1, SYSUTCDATETIME())`, /asignadaPor/],
   ['HISTORIAL.idEstadoNuevo obligatorio', `INSERT INTO HISTORIAL_ESTADOS (idSolicitud) VALUES (1)`, /idEstadoNuevo/],
@@ -87,7 +88,7 @@ const noBorrarEnUso: Case[] = [
   ['no se borra una categoría en uso', `DELETE FROM CATEGORIAS WHERE idCategoria = 1`, /FK_Solicitudes_Categorias/],
   ['no se borra un estado en uso', `DELETE FROM ESTADOS WHERE idEstado = 1`, /FK_Solicitudes_Estados/],
   ['no se borra una prioridad en uso', `DELETE FROM PRIORIDADES WHERE idPrioridad = 1`, /FK_Solicitudes_Prioridades/],
-  ['no se borra un usuario con asignaciones', `DELETE FROM USUARIOS WHERE idUsuario = 2`, /FK_Asignaciones_Usuarios/],
+  ['no se borra un usuario con asignaciones', `DELETE FROM USUARIOS WHERE idUsuario = 2`, /FK_Asignaciones_Usuarios|FK_UsuConj_Usuarios/],
   ['no se borra una solicitud con asignaciones o historial', `DELETE FROM SOLICITUDES WHERE idSolicitud = 1`, /FK_Asignaciones_Solicitudes|FK_Historial_Solicitudes/],
   ['no se borra un correo que originó una solicitud', `DELETE FROM CORREOS WHERE idCorreo = 1`, /FK_Solicitudes_Correos/],
 ];
@@ -125,11 +126,11 @@ describe('S1-05 · la BD rechaza operaciones inválidas', () => {
 
 describe('S1-05 · la BD acepta las operaciones válidas que el diseño exige permitir', () => {
   it('un correo de remitente desconocido (idResidente NULL), varios a la vez', async () => {
-    await q(`INSERT INTO CORREOS (idResidente, remitente, messageId) VALUES (NULL, 'a@x.com', 'n1'), (NULL, 'b@x.com', 'n2')`);
+    await q(`INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_SQL}, NULL, 'a@x.com', 'n1'), (${CONJ_SQL}, NULL, 'b@x.com', 'n2')`);
   });
 
   it('varios residentes sin correo (el índice único ignora NULL)', async () => {
-    await q(`INSERT INTO RESIDENTES (nombre, unidad) VALUES ('S1', 'A-1'), ('S2', 'A-2')`);
+    await q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad) VALUES (${CONJ_SQL}, 'S1', 'A-1'), (${CONJ_SQL}, 'S2', 'A-2')`);
   });
 
   it('un nuevo registro de historial', async () => {
@@ -211,7 +212,7 @@ describe('Auditoria · reglas del ciclo de vida garantizadas por la BD (trigger 
   async function solicitudDirecta(tag: string): Promise<number> {
     const r = await q<{ id: number }>(`
       DECLARE @c INT;
-      INSERT INTO CORREOS (remitente, messageId) VALUES ('x@y.com', '${tag}');
+      INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x@y.com', '${tag}');
       SET @c = SCOPE_IDENTITY();
       INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad)
         SELECT @c, 1, idEstado, 1 FROM ESTADOS WHERE nombre = 'NUEVA';
@@ -227,7 +228,7 @@ describe('Auditoria · reglas del ciclo de vida garantizadas por la BD (trigger 
 
   it('una solicitud debe nacer en NUEVA', async () => {
     await expect(q(`
-      DECLARE @c INT; INSERT INTO CORREOS (remitente, messageId) VALUES ('x@y.com', 'nace-mal'); SET @c = SCOPE_IDENTITY();
+      DECLARE @c INT; INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x@y.com', 'nace-mal'); SET @c = SCOPE_IDENTITY();
       INSERT INTO SOLICITUDES (idCorreo, idCategoria, idEstado, idPrioridad) VALUES (@c, 1, ${est('EN_PROCESO')}, 1);`))
       .rejects.toThrow(/debe crearse en estado NUEVA/);
   });
@@ -278,18 +279,18 @@ describe('Auditoria · catálogos canónicos, texto Unicode y checkpoint', () =>
   });
 
   it('messageId distingue mayúsculas: <AbC@h> y <abc@h> son correos distintos', async () => {
-    await q(`INSERT INTO CORREOS (remitente, messageId) VALUES ('x@y.com', N'<AbC@h>'), ('x@y.com', N'<abc@h>')`);
-    await expect(q(`INSERT INTO CORREOS (remitente, messageId) VALUES ('x@y.com', N'<AbC@h>')`)).rejects.toThrow(/UX_Correos_messageId/);
+    await q(`INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x@y.com', N'<AbC@h>'), (${CONJ_SQL}, 'x@y.com', N'<abc@h>')`);
+    await expect(q(`INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x@y.com', N'<AbC@h>')`)).rejects.toThrow(/UX_Correos_messageId/);
   });
 
   it('asunto y cuerpo conservan emojis y caracteres no latinos (NVARCHAR)', async () => {
-    await q(`INSERT INTO CORREOS (remitente, messageId, asunto, cuerpo) VALUES (N'ñandú@correo.co', N'<uni@h>', N'Fuga 🚰 en 公寓 — €', N'Señor 😀 ąę ж')`);
+    await q(`INSERT INTO CORREOS (idConjunto, remitente, messageId, asunto, cuerpo) VALUES (${CONJ_SQL}, N'ñandú@correo.co', N'<uni@h>', N'Fuga 🚰 en 公寓 — €', N'Señor 😀 ąę ж')`);
     const r = await q<{ asunto: string; cuerpo: string; remitente: string }>(`SELECT asunto, cuerpo, remitente FROM CORREOS WHERE messageId = N'<uni@h>'`);
     expect(r[0]).toEqual({ asunto: 'Fuga 🚰 en 公寓 — €', cuerpo: 'Señor 😀 ąę ж', remitente: 'ñandú@correo.co' });
   });
 
   it('el checkpoint IMAP no admite valores negativos ni UIDVALIDITY 0', async () => {
-    await expect(q(`INSERT INTO GATEWAY_CHECKPOINT (cuenta, uidValidity, ultimoUid) VALUES ('a', -5, -10)`)).rejects.toThrow(/CK_Checkpoint_valores/);
-    await expect(q(`INSERT INTO GATEWAY_CHECKPOINT (cuenta, uidValidity, ultimoUid) VALUES ('b', 0, 1)`)).rejects.toThrow(/CK_Checkpoint_valores/);
+    await expect(q(`INSERT INTO GATEWAY_CHECKPOINT (cuenta, idConjunto, uidValidity, ultimoUid) VALUES ('a', ${CONJ_SQL}, -5, -10)`)).rejects.toThrow(/CK_Checkpoint_valores/);
+    await expect(q(`INSERT INTO GATEWAY_CHECKPOINT (cuenta, idConjunto, uidValidity, ultimoUid) VALUES ('b', ${CONJ_SQL}, 0, 1)`)).rejects.toThrow(/CK_Checkpoint_valores/);
   });
 });

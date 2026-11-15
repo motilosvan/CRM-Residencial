@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrate } from './migrate.js';
-import { dropTempDb, runSql, tempDbConfig } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, dropTempDb, runSql, tempDbConfig } from '../../test/helpers/testDb.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const baselinePath = path.join(root, 'ScriptBaseDatosCRM.sql');
@@ -109,12 +109,12 @@ describe('0002_integridad — migración de datos existentes', () => {
 describe('0002_integridad — garantías de la BD (smoke; la matriz completa es S1-05)', () => {
   it('rechaza un messageId repetido', async () => {
     await expect(
-      q(`INSERT INTO CORREOS (remitente, messageId) VALUES ('x@y.com', 'legacy-1@soc-crm.local')`),
+      q(`INSERT INTO CORREOS (idConjunto, remitente, messageId) VALUES (${CONJ_SQL}, 'x@y.com', 'legacy-1@soc-crm.local')`),
     ).rejects.toThrow(/UX_Correos_messageId|duplicate/i);
   });
 
   it('acepta un correo de remitente desconocido (idResidente NULL)', async () => {
-    await q(`INSERT INTO CORREOS (idResidente, remitente, messageId) VALUES (NULL, 'nuevo@y.com', 'abc@x')`);
+    await q(`INSERT INTO CORREOS (idConjunto, idResidente, remitente, messageId) VALUES (${CONJ_SQL}, NULL, 'nuevo@y.com', 'abc@x')`);
   });
 
   it('rechaza una segunda asignación vigente', async () => {

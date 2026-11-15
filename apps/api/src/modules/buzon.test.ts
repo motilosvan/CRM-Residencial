@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { NotFound, ValidationError } from '../errors.js';
 import { detalleCorreo, estadoGateway, leerCheckpoint, listarCorreos } from './consultas.js';
 import { ingestarCorreo } from './ingesta.js';
@@ -8,7 +8,7 @@ let db: TestDb;
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_buz');
-  await db.q(`INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES (N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
+  await db.q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
   const base = Date.UTC(2026, 9, 1, 12);
   await ingestarCorreo(db.pool, {
     messageId: '<buz-1@mail>', remitente: 'ana@mail.com', asunto: 'Fuga de agua en el baño',

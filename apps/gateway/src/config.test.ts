@@ -34,4 +34,10 @@ describe('Gateway · cargarConfig', () => {
     expect(() => cargarConfig({ ...base, IMAP_MARCAR_LEIDO: 'si' })).toThrow(/IMAP_MARCAR_LEIDO/);
     expect(cargarConfig({ ...base, IMAP_MARCAR_LEIDO: 'true' }).marcarLeido).toBe(true);
   });
+
+  it('el conjunto del buzón sale de IMAP_CONJUNTO_SLUG; por defecto, el inicial', () => {
+    expect(cargarConfig(base).conjuntoSlug).toBe('parque-central-occidente');
+    expect(cargarConfig({ ...base, IMAP_CONJUNTO_SLUG: ' torres-del-norte ' }).conjuntoSlug).toBe('torres-del-norte');
+    expect(() => cargarConfig({ ...base, IMAP_CONJUNTO_SLUG: 'Con Espacios' })).toThrow(/IMAP_CONJUNTO_SLUG/);
+  });
 });

@@ -52,6 +52,11 @@ export async function dropTempDb(cfg: DbConfig): Promise<void> {
   }
 }
 
+/** Conjunto que la migración 0007 crea y al que asocia los datos previos. */
+export const SLUG_INICIAL = 'parque-central-occidente';
+/** Subconsulta para los INSERT crudos de las pruebas: no hay DEFAULT de idConjunto en la BD. */
+export const CONJ_SQL = "(SELECT idConjunto FROM dbo.CONJUNTOS WHERE slug = 'parque-central-occidente')";
+
 export interface TestDb {
   config: DbConfig;
   pool: sql.ConnectionPool;
@@ -76,4 +81,56 @@ export async function setupTestDb(prefix: string): Promise<TestDb> {
       await dropTempDb(config);
     },
   };
+}
+
+export async function idConjuntoInicial(db: TestDb): Promise<number> {
+  const r = await db.pool
+    .request()
+    .input('slug', sql.VarChar(80), SLUG_INICIAL)
+    .query<{ id: number }>('SELECT idConjunto AS id FROM dbo.CONJUNTOS WHERE slug = @slug');
+  if (!r.recordset[0]) throw new Error('Falta el conjunto inicial (¿se aplicó 0007?)');
+  return r.recordset[0].id;
+}
+
+export interface NuevoUsuario {
+  nombre: string;
+  correo: string;
+  rol: 'ADMIN' | 'SOPORTE';
+  /** Conjunto de la membresía; por defecto, el inicial. */
+  slug?: string;
+  /** Se aplica al usuario y a su membresía. */
+  activo?: boolean;
+}
+
+/** Crea un usuario y su membresía (USUARIO_CONJUNTOS) en una transacción. Devuelve su id. */
+export async function crearUsuario(db: TestDb, u: NuevoUsuario): Promise<number> {
+  const tx = new sql.Transaction(db.pool);
+  await tx.begin();
+  try {
+    const activo = u.activo ?? true;
+    const r = await new sql.Request(tx)
+      .input('nombre', sql.NVarChar(100), u.nombre)
+      .input('rol', sql.VarChar(30), u.rol)
+      .input('correo', sql.NVarChar(320), u.correo)
+      .input('activo', sql.Bit, activo)
+      .query<{ id: number }>(
+        'INSERT INTO dbo.USUARIOS (nombre, rol, correo, activo) OUTPUT inserted.idUsuario AS id VALUES (@nombre, @rol, @correo, @activo)',
+      );
+    const id = r.recordset[0]!.id;
+    const m = await new sql.Request(tx)
+      .input('id', sql.Int, id)
+      .input('slug', sql.VarChar(80), u.slug ?? SLUG_INICIAL)
+      .input('rol', sql.VarChar(30), u.rol)
+      .input('activo', sql.Bit, activo)
+      .query(
+        `INSERT INTO dbo.USUARIO_CONJUNTOS (idUsuario, idConjunto, rol, activo)
+         SELECT @id, idConjunto, @rol, @activo FROM dbo.CONJUNTOS WHERE slug = @slug`,
+      );
+    if (m.rowsAffected[0] !== 1) throw new Error(`No existe el conjunto ${u.slug ?? SLUG_INICIAL}`);
+    await tx.commit();
+    return id;
+  } catch (err) {
+    await tx.rollback().catch(() => undefined);
+    throw err;
+  }
 }

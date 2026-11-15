@@ -58,9 +58,12 @@ export async function asignar(pool: sql.ConnectionPool, entrada: Asignacion, hoo
       .input('id', sql.Int, p.idSolicitud)
       .input('u', sql.Int, p.idResponsable)
       .input('por', sql.Int, p.idAsignador)
+      // ASIGNACIONES tiene trigger (membresía, 0007): SQL Server exige OUTPUT ... INTO.
       .query<{ idAsignacion: number }>(
-        `INSERT INTO ASIGNACIONES (idSolicitud, idUsuario, asignadaPor)
-         OUTPUT inserted.idAsignacion VALUES (@id, @u, @por)`,
+        `DECLARE @ids TABLE (idAsignacion INT);
+         INSERT INTO ASIGNACIONES (idSolicitud, idUsuario, asignadaPor)
+         OUTPUT inserted.idAsignacion INTO @ids VALUES (@id, @u, @por);
+         SELECT idAsignacion FROM @ids;`,
       );
     await paso(hooks, 'asignacion');
 

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, crearUsuario, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { ValidationError } from '../errors.js';
 import { asignar } from './asignaciones.js';
 import { detalleCorreo, listarCorreos, solicitudesParaSugerir } from './consultas.js';
@@ -11,7 +11,7 @@ let n = 0;
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_sug');
-  await db.q(`INSERT INTO RESIDENTES (nombre, unidad, correo) VALUES (N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
+  await db.q(`INSERT INTO RESIDENTES (idConjunto, nombre, unidad, correo) VALUES (${CONJ_SQL}, N'Ana Pérez', 'T1-101', 'ana@mail.com')`);
 });
 afterAll(async () => db.close());
 beforeEach(async () => {
@@ -149,11 +149,9 @@ describe('solicitudesParaSugerir', () => {
   it('una solicitud que ya no está NUEVA no gasta cuota de IA', async () => {
     await db.q('INSERT INTO SUGERENCIAS_IA (idSolicitud, estado, proveedor, modelo) SELECT idSolicitud, \'FALLIDA\', \'p\', \'m\' FROM SOLICITUDES');
     const id = await nuevaSolicitud();
-    const usuarios = await db.q<{ id: number }>(
-      `INSERT INTO USUARIOS (nombre, rol, correo, activo) OUTPUT inserted.idUsuario AS id
-       VALUES ('Admin', 'ADMIN', 'admin@x.co', 1), ('Soporte', 'SOPORTE', 'soporte@x.co', 1)`,
-    );
-    await asignar(db.pool, { idSolicitud: id, idResponsable: usuarios[1]!.id, idAsignador: usuarios[0]!.id, versionEsperada: 1 });
+    const admin = await crearUsuario(db, { nombre: 'Admin', rol: 'ADMIN', correo: 'admin@x.co' });
+    const soporte = await crearUsuario(db, { nombre: 'Soporte', rol: 'SOPORTE', correo: 'soporte@x.co' });
+    await asignar(db.pool, { idSolicitud: id, idResponsable: soporte, idAsignador: admin, versionEsperada: 1 });
     expect(await pendientes()).toEqual([]);
   });
 });

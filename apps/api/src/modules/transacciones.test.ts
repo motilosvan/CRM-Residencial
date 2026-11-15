@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ESTADOS, puedeTransicionar } from '../domain/estados.js';
-import { setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { crearUsuario, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { ConflictError, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
 import { asignar } from './asignaciones.js';
 import { ingestarCorreo } from './ingesta.js';
@@ -15,11 +15,11 @@ let contador = 0;
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_tx2');
-  await db.q(`
-    INSERT INTO USUARIOS (nombre, rol, correo, activo) VALUES
-      ('Admin', 'ADMIN', 'admin@c.com', 1), ('Soporte A', 'SOPORTE', 'a@c.com', 1),
-      ('Soporte B', 'SOPORTE', 'b@c.com', 1), ('Inactivo', 'SOPORTE', 'i@c.com', 0);
-  `);
+  // Ids 1–4 en este orden (las constantes de arriba dependen de ello).
+  await crearUsuario(db, { nombre: 'Admin', rol: 'ADMIN', correo: 'admin@c.com' });
+  await crearUsuario(db, { nombre: 'Soporte A', rol: 'SOPORTE', correo: 'a@c.com' });
+  await crearUsuario(db, { nombre: 'Soporte B', rol: 'SOPORTE', correo: 'b@c.com' });
+  await crearUsuario(db, { nombre: 'Inactivo', rol: 'SOPORTE', correo: 'i@c.com', activo: false });
 });
 afterAll(async () => db.close());
 
