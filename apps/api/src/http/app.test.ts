@@ -1,15 +1,23 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CONJ_SQL, idConjuntoInicial, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
+import { CONJ_SQL, crearUsuario, idConjuntoInicial, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { crearPool } from '../db/pool.js';
+import { EnviadorLocal } from '../modules/enviador.js';
 import { ingestarCorreo } from '../modules/ingesta.js';
-import { construirApp } from './app.js';
+import { crearSesion } from '../modules/sesiones.js';
+import { construirApp, type OpcionesApp } from './app.js';
 
 let db: TestDb;
 let app: FastifyInstance;
-let inicial: number;
+let cookie: string;
 const errores: string[] = [];
 const HOST = '127.0.0.1:3000';
+const acceso: OpcionesApp['acceso'] = {
+  secreto: 'secreto-de-pruebas-con-más-de-32-caracteres',
+  enviador: new EnviadorLocal(() => undefined),
+  cookieSegura: false,
+  origenesPermitidos: new Set(['http://localhost:5173']),
+};
 
 beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_http');
@@ -19,15 +27,18 @@ beforeAll(async () => {
     checkpoint: { cuenta: 'buzon@gmail.com/INBOX', uidValidity: 3, uid: 10 },
   });
   await ingestarCorreo(db.pool, { messageId: '<http-2@mail>', remitente: 'otro@mail.com', asunto: 'Paz y salvo', cuerpo: '' });
-  inicial = await idConjuntoInicial(db);
-  app = construirApp({ pool: db.pool, idConjunto: inicial, hostsPermitidos: new Set([HOST]), registrarError: (d) => errores.push(d) });
+  const inicial = await idConjuntoInicial(db);
+  const idUsuario = await crearUsuario(db, { nombre: 'Soporte Demo', correo: 'soporte@demo.mailflow.test', rol: 'SOPORTE' });
+  const { token } = await crearSesion(db.pool, { idUsuario, idConjunto: inicial });
+  cookie = `mailflow_sesion=${token}`;
+  app = construirApp({ pool: db.pool, hostsPermitidos: new Set([HOST]), acceso, registrarError: (d) => errores.push(d) });
 });
 afterAll(async () => {
   await app.close();
   await db.close();
 });
 
-const get = (url: string, host = HOST) => app.inject({ method: 'GET', url, headers: { host } });
+const get = (url: string, host = HOST) => app.inject({ method: 'GET', url, headers: { host, cookie } });
 
 describe('API · buzón', () => {
   it('GET /api/correos lista el buzón con residente, solicitud y fechas ISO', async () => {
@@ -65,6 +76,18 @@ describe('API · buzón', () => {
   });
 });
 
+describe('API · sesión obligatoria', () => {
+  it.each(['/api/correos', '/api/correos/1', '/api/gateway/estado'])('GET %s sin cookie ⇒ 401 NO_AUTENTICADO', async (url) => {
+    const r = await app.inject({ method: 'GET', url, headers: { host: HOST } });
+    expect(r.statusCode).toBe(401);
+    expect(r.json()).toMatchObject({ codigo: 'NO_AUTENTICADO' });
+  });
+
+  it('/api/salud sigue pública', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/salud', headers: { host: HOST } })).statusCode).toBe(200);
+  });
+});
+
 describe('API · defensas', () => {
   it('rechaza un Host ajeno (DNS rebinding) con 421', async () => {
     expect((await get('/api/correos', 'evil.example:3000')).statusCode).toBe(421);
@@ -79,8 +102,8 @@ describe('API · defensas', () => {
   it('BD inalcanzable ⇒ 500 genérico y el registro lleva solo tipo y código', async () => {
     const cerrado = await crearPool(db.config, { max: 1 });
     await cerrado.close();
-    const roto = construirApp({ pool: cerrado, idConjunto: inicial, hostsPermitidos: new Set([HOST]), registrarError: (d) => errores.push(d) });
-    const r = await roto.inject({ method: 'GET', url: '/api/correos', headers: { host: HOST } });
+    const roto = construirApp({ pool: cerrado, hostsPermitidos: new Set([HOST]), acceso, registrarError: (d) => errores.push(d) });
+    const r = await roto.inject({ method: 'GET', url: '/api/correos', headers: { host: HOST, cookie } });
     await roto.close();
     expect(r.statusCode).toBe(500);
     expect(r.json()).toEqual({ error: 'Error interno' });
