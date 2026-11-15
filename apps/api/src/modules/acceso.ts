@@ -230,7 +230,8 @@ export async function verificarCodigo(
       }
     }
 
-    // El conteo sale de la fila (intentosFallidos + 1), no del valor leído; OUTPUT devuelve el resultado.
+    // El conteo sale de la fila (intentosFallidos + 1), no del valor leído; OUTPUT devuelve el resultado
+    // (con INTO: un OUTPUT directo falla con 334 si la tabla llega a tener un trigger).
     const hastaSiBloquea = new Date(t + BLOQUEO_MS);
     const conteo = await tx
       .request()
@@ -240,14 +241,16 @@ export async function verificarCodigo(
       .input('hasta', sql.DateTime2, hastaSiBloquea)
       .input('ahora', sql.DateTime2, ahora)
       .query<{ fallidos: number }>(
-        `UPDATE r
+        `DECLARE @conteo TABLE (fallidos TINYINT);
+         UPDATE r
             SET intentosFallidos = n.fallidos,
                 bloqueadoHasta = CASE WHEN n.fallidos >= @max THEN @hasta ELSE NULL END,
                 consumidoEn = CASE WHEN n.fallidos >= @max THEN @ahora ELSE r.consumidoEn END
-         OUTPUT inserted.intentosFallidos AS fallidos
+         OUTPUT inserted.intentosFallidos INTO @conteo
            FROM dbo.RETOS_ACCESO r
           CROSS APPLY (SELECT CASE WHEN @reiniciar = 1 THEN 0 ELSE r.intentosFallidos END + 1 AS fallidos) n
-          WHERE r.idReto = @id`,
+          WHERE r.idReto = @id;
+         SELECT fallidos FROM @conteo;`,
       );
     const fallidos = conteo.recordset[0]!.fallidos;
     if (fallidos >= MAX_INTENTOS) return fallo(bloqueado(hastaSiBloquea));

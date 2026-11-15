@@ -162,6 +162,35 @@ describe('Sesiones · revocar', () => {
   });
 });
 
+/**
+ * Reloj de la API atrasado respecto a cuando se creó la sesión (p. ej. un ajuste de NTP): revocar no puede
+ * violar CK_Sesiones_revocada ni dar 500; revocadaEn se acota a creadaEn. La revocación por inactividad no
+ * puede darse con un reloj atrasado (exige ahora > ultimaActividad >= creadaEn), y la renovación de
+ * ultimaActividad tampoco (exige ahora - ultimaActividad >= RENOVACION_MIN_MS).
+ */
+describe('Sesiones · reloj atrasado', () => {
+  it('revocarSesion con un reloj anterior a creadaEn no lanza y deja revocadaEn = creadaEn', async () => {
+    const { token } = await crearSesion(db.pool, { idUsuario: idAdmin, idConjunto: conjunto }, en(0));
+    await expect(revocarSesion(db.pool, token, en(-5000))).resolves.toBeUndefined();
+    expect((await fila(token))!.revocadaEn?.getTime()).toBe(T0);
+    await errorDe(leerSesion(db.pool, token, en(1000)), 'NO_AUTENTICADO');
+  });
+
+  it('la revocación por usuario desactivado con un reloj atrasado da 401 (no 500) y revocadaEn = creadaEn', async () => {
+    const id = await crearUsuario(db, { nombre: 'Soporte Reloj', correo: 'soporte-reloj@demo.mailflow.test', rol: 'SOPORTE' });
+    const { token } = await crearSesion(db.pool, { idUsuario: id, idConjunto: conjunto }, en(0));
+    await db.q(`UPDATE USUARIOS SET activo = 0 WHERE idUsuario = ${id}`);
+    await errorDe(leerSesion(db.pool, token, en(-60_000)), 'NO_AUTENTICADO');
+    expect((await fila(token))!.revocadaEn?.getTime()).toBe(T0);
+  });
+
+  it('leer con un reloj atrasado no renueva ultimaActividad (no la lleva antes de creadaEn)', async () => {
+    const { token } = await crearSesion(db.pool, { idUsuario: idAdmin, idConjunto: conjunto }, en(0));
+    expect((await leerSesion(db.pool, token, en(-10 * MIN))).ultimaActividad).toBe(T0);
+    expect((await fila(token))!.ultimaActividad.getTime()).toBe(T0);
+  });
+});
+
 describe('Sesiones · cambiar de conjunto', () => {
   it('a un conjunto con membresía activa devuelve el rol de ese conjunto', async () => {
     const { token } = await crearSesion(db.pool, { idUsuario: idAdmin, idConjunto: conjunto }, en(0));

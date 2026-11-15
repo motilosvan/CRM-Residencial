@@ -83,12 +83,15 @@ async function cargarDto(tx: Tx, idUsuario: number, idConjuntoActivo: number, ul
   };
 }
 
+/** Un reloj atrasado respecto a creadaEn no puede violar CK_Sesiones_revocada: se acota a creadaEn. */
+const REVOCADA_EN = 'revocadaEn = CASE WHEN @ahora < creadaEn THEN creadaEn ELSE @ahora END';
+
 async function revocar(tx: Tx, idSesion: string, ahora: Date): Promise<void> {
   await tx
     .request()
     .input('id', sql.BigInt, idSesion)
     .input('ahora', sql.DateTime2, ahora)
-    .query('UPDATE dbo.SESIONES SET revocadaEn = @ahora WHERE idSesion = @id AND revocadaEn IS NULL');
+    .query(`UPDATE dbo.SESIONES SET ${REVOCADA_EN} WHERE idSesion = @id AND revocadaEn IS NULL`);
 }
 
 /**
@@ -216,6 +219,6 @@ export async function revocarSesion(pool: sql.ConnectionPool, token: string | un
       .request()
       .input('hash', sql.VarBinary(32), hash)
       .input('ahora', sql.DateTime2, ahora)
-      .query('UPDATE dbo.SESIONES SET revocadaEn = @ahora WHERE tokenHash = @hash AND revocadaEn IS NULL');
+      .query(`UPDATE dbo.SESIONES SET ${REVOCADA_EN} WHERE tokenHash = @hash AND revocadaEn IS NULL`);
   });
 }

@@ -347,6 +347,21 @@ describe('Acceso · bloqueo del reto entre transacciones simultáneas', () => {
   });
 });
 
+describe('Acceso · RETOS_ACCESO con un trigger', () => {
+  // Un UPDATE con OUTPUT sin INTO falla (error 334) si la tabla tiene un trigger habilitado.
+  it('verificarCodigo sigue funcionando si RETOS_ACCESO tiene un trigger', async () => {
+    const correo = 'trigger@mail.com';
+    await solicitarCodigo(db.pool, deps(), { conjuntoId, correo });
+    await db.q(`CREATE OR ALTER TRIGGER dbo.TR_Prueba_retos ON dbo.RETOS_ACCESO AFTER UPDATE AS BEGIN SET NOCOUNT ON; END;`);
+    try {
+      const e = await errorDe(verificarCodigo(db.pool, deps(), { conjuntoId, correo, codigo: '000000' }), 'CODIGO_INCORRECTO');
+      expect(e.detalle).toEqual({ intentosRestantes: 4 });
+    } finally {
+      await db.q(`DROP TRIGGER IF EXISTS dbo.TR_Prueba_retos`);
+    }
+  });
+});
+
 describe('Acceso · envío', () => {
   it('un enviador que rechaza no cambia la respuesta; se registra el tipo de error sin el correo', async () => {
     const correo = 'falla@demo.mailflow.test';

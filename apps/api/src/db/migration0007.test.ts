@@ -193,7 +193,7 @@ describe('0007_conjuntos_y_acceso — integridad entre conjuntos', () => {
     ).rejects.toThrow(/CK_UsuConj_rol/);
     const reto = (c: string) =>
       `INSERT INTO RETOS_ACCESO (idConjunto, correo, codigoHash, existeUsuario, venceEn, reenvioDisponibleEn)
-       VALUES (${c}, 'admin@demo.mailflow.test', 0x${'00'.repeat(32)}, 1, SYSUTCDATETIME(), SYSUTCDATETIME())`;
+       VALUES (${c}, 'admin@demo.mailflow.test', 0x${'00'.repeat(32)}, 1, DATEADD(MINUTE, 10, SYSUTCDATETIME()), SYSUTCDATETIME())`;
     await q(reto(CONJ_SQL));
     await q(reto(CONJ_B));
     await expect(q(reto(CONJ_SQL))).rejects.toThrow(/UX_Retos_conjunto_correo/);
@@ -345,6 +345,48 @@ describe('0007_conjuntos_y_acceso — correos, residentes y solicitudes no cambi
     await q(`UPDATE SOLICITUDES SET idCorreo = idCorreo, idPrioridad = 2 WHERE idSolicitud = ${solicitud}`);
     expect(await conjuntoDe(correoSinResidente)).toBe(1);
   });
+
+  describe('GATEWAY_CHECKPOINT (PK cuenta, que sí se puede actualizar)', () => {
+    const CUENTA_A = 'buzon@demo.mailflow.test/INBOX'; // checkpoint previo, quedó en el conjunto inicial
+    const CUENTA_B = 'buzon-b@demo.mailflow.test/INBOX';
+    const enInicial = async (cuenta: string) =>
+      (await q<{ esInicial: number }>(
+        `SELECT CASE WHEN idConjunto = ${CONJ_SQL} THEN 1 ELSE 0 END AS esInicial FROM GATEWAY_CHECKPOINT WHERE cuenta = '${cuenta}'`,
+      ))[0]?.esInicial;
+
+    beforeAll(async () => {
+      await q(`INSERT INTO GATEWAY_CHECKPOINT (cuenta, idConjunto, uidValidity, ultimoUid) VALUES ('${CUENTA_B}', ${CONJ_B}, 1, 1)`);
+    });
+
+    it('un checkpoint no se puede mover a otro conjunto', async () => {
+      await expect(q(`UPDATE GATEWAY_CHECKPOINT SET idConjunto = ${CONJ_B} WHERE cuenta = '${CUENTA_A}'`)).rejects.toMatchObject({
+        number: 50030,
+        message: expect.stringMatching(/conjunto de un checkpoint/),
+      });
+      expect(await enInicial(CUENTA_A)).toBe(1);
+    });
+
+    it('multi-fila: una fila que cambia de conjunto rechaza todo el UPDATE', async () => {
+      await expect(
+        q(`UPDATE GATEWAY_CHECKPOINT SET idConjunto = ${CONJ_B} WHERE cuenta IN ('${CUENTA_A}', '${CUENTA_B}')`),
+      ).rejects.toMatchObject({ number: 50030 });
+      expect(await enInicial(CUENTA_A)).toBe(1);
+      expect(await enInicial(CUENTA_B)).toBe(0);
+    });
+
+    it('renombrar la cuenta y cambiar el conjunto en el mismo UPDATE también se rechaza', async () => {
+      await expect(
+        q(`UPDATE GATEWAY_CHECKPOINT SET cuenta = 'renombrada@demo.mailflow.test/INBOX', idConjunto = ${CONJ_B} WHERE cuenta = '${CUENTA_A}'`),
+      ).rejects.toMatchObject({ number: 50030 });
+      expect(await enInicial(CUENTA_A)).toBe(1);
+    });
+
+    it('se aceptan los UPDATE que no cambian el conjunto (varias filas)', async () => {
+      await q(`UPDATE GATEWAY_CHECKPOINT SET idConjunto = idConjunto, ultimoUid = ultimoUid + 1 WHERE cuenta IN ('${CUENTA_A}', '${CUENTA_B}')`);
+      expect(await enInicial(CUENTA_A)).toBe(1);
+      expect(await enInicial(CUENTA_B)).toBe(0);
+    });
+  });
 });
 
 describe('0007_conjuntos_y_acceso — CHECK de RETOS_ACCESO y SESIONES', () => {
@@ -361,6 +403,18 @@ describe('0007_conjuntos_y_acceso — CHECK de RETOS_ACCESO y SESIONES', () => {
     await expect(
       q(`UPDATE RETOS_ACCESO SET intentosFallidos = intentosFallidos + 1 WHERE correo = 'cinco@demo.mailflow.test'`),
     ).rejects.toThrow(/CK_Retos_intentos/);
+  });
+
+  it('venceEn es posterior a reenvioDisponibleEn', async () => {
+    const reto = (correo: string, vence: string) =>
+      q(`INSERT INTO RETOS_ACCESO (idConjunto, correo, codigoHash, existeUsuario, venceEn, reenvioDisponibleEn)
+         VALUES (${CONJ_SQL}, '${correo}', 0x${'00'.repeat(32)}, 1, ${vence}, '2026-01-01T10:01:00')`);
+    await reto('vigente@demo.mailflow.test', `'2026-01-01T10:10:00'`);
+    await expect(reto('igual@demo.mailflow.test', `'2026-01-01T10:01:00'`)).rejects.toThrow(/CK_Retos_vigencia/);
+    await expect(reto('antes@demo.mailflow.test', `'2026-01-01T10:00:00'`)).rejects.toThrow(/CK_Retos_vigencia/);
+    await expect(
+      q(`UPDATE RETOS_ACCESO SET reenvioDisponibleEn = '2026-01-01T10:20:00' WHERE correo = 'vigente@demo.mailflow.test'`),
+    ).rejects.toThrow(/CK_Retos_vigencia/);
   });
 
   it('ultimaActividad no es anterior a creadaEn', async () => {
@@ -400,7 +454,7 @@ describe('0007_conjuntos_y_acceso — permisos de crm_app', () => {
   it('puede insertar y actualizar retos, sesiones y membresías', async () => {
     await comoApp(`
       INSERT INTO RETOS_ACCESO (idConjunto, correo, codigoHash, existeUsuario, venceEn, reenvioDisponibleEn)
-      VALUES (${CONJ_SQL}, 'app@demo.mailflow.test', 0x${'11'.repeat(32)}, 0, SYSUTCDATETIME(), SYSUTCDATETIME());
+      VALUES (${CONJ_SQL}, 'app@demo.mailflow.test', 0x${'11'.repeat(32)}, 0, DATEADD(MINUTE, 10, SYSUTCDATETIME()), SYSUTCDATETIME());
       UPDATE RETOS_ACCESO SET intentosFallidos = 1 WHERE correo = 'app@demo.mailflow.test';
       INSERT INTO SESIONES (tokenHash, idUsuario, idConjuntoActivo) VALUES (0x${'22'.repeat(32)}, 1, ${CONJ_SQL});
       UPDATE SESIONES SET revocadaEn = SYSUTCDATETIME() WHERE tokenHash = 0x${'22'.repeat(32)};

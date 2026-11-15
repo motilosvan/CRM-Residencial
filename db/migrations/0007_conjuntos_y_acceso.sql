@@ -10,8 +10,8 @@
      CORREOS(idConjunto, idResidente) para no cruzar residentes entre conjuntos.
    - RETOS_ACCESO (OTP hasheado) y SESIONES (token hasheado): sin DELETE.
    - Trigger: responsable y quien asigna con membresía activa en el conjunto.
-   - Triggers: un correo o un residente no cambia de conjunto y una solicitud
-     no cambia de correo (THROW 50027, 50028, 50029).
+   - Triggers: un correo, un residente o un checkpoint no cambia de conjunto y
+     una solicitud no cambia de correo (THROW 50027, 50028, 50029, 50030).
    Aplica sobre una BD limpia y sobre una con datos (todo es repetible).
    ===================================================================== */
 
@@ -192,6 +192,10 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Retos_intentos')
     ALTER TABLE dbo.RETOS_ACCESO WITH CHECK ADD CONSTRAINT CK_Retos_intentos CHECK (intentosFallidos BETWEEN 0 AND 5);
 GO
+-- Las dos fechas salen del mismo instante de la aplicación (+10 min y +60 s), en el INSERT y en el UPDATE.
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Retos_vigencia')
+    ALTER TABLE dbo.RETOS_ACCESO WITH CHECK ADD CONSTRAINT CK_Retos_vigencia CHECK (venceEn > reenvioDisponibleEn);
+GO
 
 /* ---------- 7. SESIONES: token aleatorio guardado como SHA-256 ---------- */
 
@@ -294,6 +298,25 @@ BEGIN
     IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.idSolicitud = i.idSolicitud
                 WHERE i.idCorreo <> d.idCorreo)
         THROW 50029, 'El correo de una solicitud no se puede cambiar.', 1;
+END;
+GO
+
+-- El checkpoint decide desde dónde lee el gateway de cada conjunto. Su PK (cuenta) sí se puede
+-- actualizar, así que no basta con unir por la PK: si idConjunto está en el SET, toda fila nueva debe
+-- tener una fila anterior con la misma cuenta y el mismo conjunto (o NULL, el relleno). Renombrar la
+-- cuenta y tocar idConjunto en el mismo UPDATE se rechaza (conservador); renombrar sola no dispara nada.
+CREATE OR ALTER TRIGGER dbo.TR_Checkpoint_conjunto_fijo
+ON dbo.GATEWAY_CHECKPOINT
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT UPDATE(idConjunto) RETURN;
+    IF EXISTS (SELECT 1 FROM inserted i
+                WHERE NOT EXISTS (SELECT 1 FROM deleted d
+                                   WHERE d.cuenta = i.cuenta
+                                     AND (d.idConjunto IS NULL OR d.idConjunto = i.idConjunto)))
+        THROW 50030, 'El conjunto de un checkpoint del gateway no se puede cambiar.', 1;
 END;
 GO
 
