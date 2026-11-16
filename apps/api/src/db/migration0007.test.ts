@@ -462,11 +462,11 @@ describe('0007_conjuntos_y_acceso — permisos de crm_app', () => {
       UPDATE USUARIO_CONJUNTOS SET activo = 0 WHERE idUsuario = 1 AND idConjunto = ${CONJ_B};`);
   });
 
-  it('no puede borrar retos, sesiones ni membresías, ni crear conjuntos', async () => {
+  // Crear conjuntos sí se permite desde 0008 (GRANT INSERT ON CONJUNTOS): lo prueba migration0008.test.ts.
+  it('no puede borrar retos, sesiones ni membresías', async () => {
     const denegado = /permission was denied|denegado/i;
     await expect(comoApp(`DELETE FROM RETOS_ACCESO`)).rejects.toThrow(denegado);
     await expect(comoApp(`DELETE FROM SESIONES`)).rejects.toThrow(denegado);
     await expect(comoApp(`DELETE FROM USUARIO_CONJUNTOS`)).rejects.toThrow(denegado);
-    await expect(comoApp(`INSERT INTO CONJUNTOS (slug, nombre) VALUES ('hack', N'Hack')`)).rejects.toThrow(denegado);
   });
 });
