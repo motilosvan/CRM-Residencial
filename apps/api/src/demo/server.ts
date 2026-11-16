@@ -19,6 +19,7 @@ import { ESTADOS } from '../domain/estados.js';
 import { PRIORIDADES } from '../domain/priorizador.js';
 import { ConflictError, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
 import { asignar } from '../modules/asignaciones.js';
+import { idConjuntoPorSlug, SLUG_CONJUNTO_INICIAL } from '../modules/conjuntos.js';
 import { detalleSolicitud, listarSolicitudes, resumen } from '../modules/consultas.js';
 import { ingestarCorreo } from '../modules/ingesta.js';
 import { cambiarEstado, reclasificar, validar } from '../modules/solicitudes.js';
@@ -40,6 +41,7 @@ await asegurarUsuarioApp(migrador, DB, app.user, app.password);
 const pool = await crearPool(app);
 console.log((await sembrarDemo(pool)) ? 'Datos de demostración creados.' : 'La BD de demostración ya tenía datos.');
 const ADMIN = await idAdminDemo(pool);
+const CONJUNTO = await idConjuntoPorSlug(pool, SLUG_CONJUNTO_INICIAL);
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -120,7 +122,7 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
     const p = url.searchParams;
     const num = (k: string) => (p.has(k) ? Number(p.get(k)) : undefined);
     const txt = (k: string) => p.get(k) || undefined;
-    return responder(res, 200, await listarSolicitudes(pool, {
+    return responder(res, 200, await listarSolicitudes(pool, CONJUNTO, {
       estado: txt('estado') as never,
       categoria: txt('categoria') as never,
       prioridad: txt('prioridad') as never,
@@ -130,10 +132,10 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
     }));
   }
   if (req.method === 'GET' && ruta === '/api/resumen') {
-    const r = await resumen(pool);
+    const r = await resumen(pool, CONJUNTO);
     return responder(res, 200, { ...r, responsables: r.carga.map((c) => ({ id: c.idUsuario, nombre: c.nombre })) });
   }
-  if (req.method === 'GET' && m && !m[2]) return responder(res, 200, await detalleSolicitud(pool, Number(m[1])));
+  if (req.method === 'GET' && m && !m[2]) return responder(res, 200, await detalleSolicitud(pool, CONJUNTO, Number(m[1])));
 
   if (req.method === 'POST' && m?.[2] === 'estado') {
     const b = validar(Esquemas.estado, await leerJson(req));

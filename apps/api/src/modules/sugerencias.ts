@@ -1,10 +1,17 @@
 import sql from 'mssql';
 import { z } from 'zod';
-import { CATEGORIAS } from '../domain/clasificador.js';
-import { PRIORIDADES, prioridadPermitida } from '../domain/priorizador.js';
+import { CATEGORIAS, type Categoria } from '../domain/clasificador.js';
+import { PRIORIDADES, prioridadPermitida, type Prioridad } from '../domain/priorizador.js';
 import { withTx } from '../db/withTx.js';
+import { ConflictError, Forbidden, ValidationError } from '../errors.js';
 import { truncarUtf16 } from './ingesta.js';
-import { validar } from './solicitudes.js';
+import {
+  bloquearSolicitud,
+  registrarHistorial,
+  validar,
+  verificarUsuarioActivo,
+  type Actor,
+} from './solicitudes.js';
 
 const LIMITE_RESUMEN = 500; // = SUGERENCIAS_IA.resumen NVARCHAR(500)
 const LIMITE_JUSTIFICACION = 1000; // = SUGERENCIAS_IA.justificacion NVARCHAR(1000)
@@ -95,5 +102,84 @@ export async function registrarFalloSugerencia(pool: sql.ConnectionPool, entrada
            VALUES (@id, CASE WHEN @max <= 1 THEN 'FALLIDA' ELSE 'EN_REINTENTO' END, @proveedor, @modelo, 1, @causa,
                    CASE WHEN @max <= 1 THEN NULL ELSE DATEADD(MINUTE, @espera, SYSUTCDATETIME()) END);`,
       );
+  });
+}
+
+const idPositivo = z.number().int().positive();
+
+export const AceptarSugerenciaSchema = z.object({
+  idSolicitud: idPositivo,
+  idUsuario: idPositivo,
+  versionEsperada: idPositivo,
+  comentario: z.string().max(300).optional(),
+});
+export type AceptarSugerencia = z.input<typeof AceptarSugerenciaSchema>;
+
+/**
+ * Acepta la sugerencia LISTA de IA aplicándola como reclasificación (T4) con `versionEsperada` y dejando
+ * historial. La sugerencia no cambia la solicitud por sí sola: solo el usuario la confirma aquí.
+ */
+export async function aceptarSugerencia(
+  pool: sql.ConnectionPool,
+  entrada: AceptarSugerencia,
+  actor?: Actor,
+) {
+  const p = validar(AceptarSugerenciaSchema, entrada);
+  return withTx(pool, async (tx) => {
+    const sol = await bloquearSolicitud(tx, p.idSolicitud, p.versionEsperada, actor?.idConjunto);
+    if (actor && actor.rol !== 'ADMIN') {
+      throw new Forbidden('Solo un administrador puede aceptar sugerencias');
+    }
+    if (sol.estado === 'CERRADA') throw new ValidationError('Una solicitud CERRADA no se reclasifica');
+    await verificarUsuarioActivo(tx, p.idUsuario);
+
+    const r = await tx
+      .request()
+      .input('id', sql.Int, p.idSolicitud)
+      .query<{ estado: string; categoria: Categoria | null; prioridad: Prioridad | null }>(
+        `SELECT g.estado, cat.nombre AS categoria, pri.nombre AS prioridad
+           FROM SUGERENCIAS_IA g
+           LEFT JOIN CATEGORIAS cat ON cat.idCategoria = g.idCategoria
+           LEFT JOIN PRIORIDADES pri ON pri.idPrioridad = g.idPrioridad
+          WHERE g.idSolicitud = @id`,
+      );
+    const sug = r.recordset[0];
+    if (!sug || sug.estado !== 'LISTA' || !sug.categoria || !sug.prioridad) {
+      throw new ValidationError('No hay una sugerencia lista para aceptar en esta solicitud');
+    }
+    const categoria = sug.categoria;
+    const prioridad = prioridadPermitida(categoria, sug.prioridad);
+    if (categoria === sol.categoria && prioridad === sol.prioridad) {
+      return { idSolicitud: p.idSolicitud, categoria, prioridad, version: sol.version, sinCambios: true as const };
+    }
+
+    const upd = await tx
+      .request()
+      .input('id', sql.Int, p.idSolicitud)
+      .input('cat', sql.VarChar(50), categoria)
+      .input('pri', sql.VarChar(20), prioridad)
+      .input('v', sql.Int, p.versionEsperada)
+      .query(
+        `UPDATE SOLICITUDES
+            SET idCategoria = (SELECT idCategoria FROM CATEGORIAS WHERE nombre = @cat),
+                idPrioridad = (SELECT idPrioridad FROM PRIORIDADES WHERE nombre = @pri),
+                version = version + 1
+          WHERE idSolicitud = @id AND version = @v`,
+      );
+    if (upd.rowsAffected[0] !== 1) throw new ConflictError('La solicitud cambió durante la operación');
+
+    const cambios = [
+      categoria !== sol.categoria ? `categoría ${sol.categoria} → ${categoria}` : null,
+      prioridad !== sol.prioridad ? `prioridad ${sol.prioridad} → ${prioridad}` : null,
+    ].filter(Boolean);
+    await registrarHistorial(tx, {
+      idSolicitud: p.idSolicitud,
+      idEstadoAnterior: sol.idEstado,
+      idEstadoNuevo: sol.idEstado,
+      idUsuario: p.idUsuario,
+      comentario: `Sugerencia IA aceptada: ${cambios.join('; ')}${p.comentario ? `. ${p.comentario}` : ''}`,
+    });
+
+    return { idSolicitud: p.idSolicitud, categoria, prioridad, version: p.versionEsperada + 1, sinCambios: false as const };
   });
 }

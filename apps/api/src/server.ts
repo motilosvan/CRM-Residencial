@@ -36,6 +36,7 @@ const app = construirApp({
     cookieSegura: acceso.cookieSegura,
     origenesPermitidos: acceso.origenes,
   },
+  limitePeticiones: { max: 30, ventanaMs: 60_000 },
 });
 
 for (const senal of ['SIGINT', 'SIGTERM'] as const) {

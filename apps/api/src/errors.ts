@@ -4,6 +4,10 @@ export class NotFound extends Error {
   override name = 'NotFound';
 }
 
+export class Forbidden extends Error {
+  override name = 'Forbidden';
+}
+
 /** La solicitud cambió desde que el cliente la leyó (control de concurrencia optimista). */
 export class ConflictError extends Error {
   override name = 'ConflictError';

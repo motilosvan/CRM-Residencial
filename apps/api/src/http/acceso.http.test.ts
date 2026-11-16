@@ -55,8 +55,12 @@ async function nuevoConjunto(slug: string, nombre: string): Promise<number> {
 }
 
 /** Pide y verifica un código; devuelve la respuesta de verificar. */
+let techoReloj = 0;
 async function entrar(a: FastifyInstance, conjuntoId = inicial) {
-  ahora = new Date(Math.max(ahora.getTime(), Date.now()) + 2 * 60_000); // supera el reenvío de 60 s del código anterior
+  // Monótono entre llamadas: supera el reenvío de 60 s del código anterior aunque otra prueba haya
+  // fijado `ahora` en una fecha que ya quedó en el pasado.
+  techoReloj = Math.max(techoReloj, ahora.getTime(), Date.now()) + 2 * 60_000;
+  ahora = new Date(techoReloj);
   const c = await pedir(a, 'POST', '/api/auth/codigo', { payload: { conjuntoId: String(conjuntoId), correo: CORREO }, origin: ORIGEN });
   expect(c.statusCode).toBe(200);
   return pedir(a, 'POST', '/api/auth/verificar', {

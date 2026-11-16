@@ -114,7 +114,7 @@ Decisiones que afectan a las semanas siguientes:
 
 ## Semana 4 — API y autenticación  (hito M4)
 
-**Estado (B1): parcial.** Acceso y sesión hechos, con un cambio frente a S4-01: no hay login con contraseña ni argon2. La entrada es un código de un solo uso por correo (`POST /api/auth/codigo` y `/verificar`) con sesión en cookie `httpOnly` y vencimiento por inactividad de 30 min. Quedan protegidas `/api/correos*` y `/api/gateway/estado`. Pendiente: límite de peticiones por IP (requisito antes de exponer la API fuera de `127.0.0.1`), S4-02 y S4-03 (B2). Detalle en `docs/mailflow-backend-entrevista.md`.
+**Estado: completa (B1 + B2).** Acceso por código OTP (`/api/auth/codigo` y `/verificar`) con límite por IP (`limitePeticiones` en `server.ts`), sesión en cookie `httpOnly` con vencimiento por inactividad de 30 min, rutas protegidas de buzón, solicitudes (T2–T4 y aceptar sugerencia T7→T4), usuarios del conjunto, resumen y autorización por rol (`USUARIO_CONJUNTOS.rol`) dentro de `withTx` (`SOPORTE` solo sus asignadas; `ADMIN` para asignar, reclasificar, listar usuarios y reportes). Detalle de acceso en `docs/mailflow-backend-entrevista.md`.
 
 | ID | Tarea | Agente | Aceptación |
 |---|---|---|---|
@@ -123,6 +123,8 @@ Decisiones que afectan a las semanas siguientes:
 | S4-03 | Autorización por rol en servidor (SOPORTE solo sus asignadas) | `tx-engineer` | Matriz de permisos probada |
 
 ## Semana 5 — Panel y reportes  (hito M5)
+
+**Estado:** S5-01 completo en el backend (`generarReporte`, `reporteACsv` y `GET /api/reportes` en `SNAPSHOT`, por conjunto y rol `ADMIN`). Faltan S5-02 y S5-03 en el panel (`apps/web`).
 
 | ID | Tarea | Agente | Aceptación |
 |---|---|---|---|

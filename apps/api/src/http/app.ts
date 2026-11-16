@@ -1,17 +1,30 @@
 import fastifyCookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type sql from 'mssql';
-import { ConflictError, ErrorAcceso, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
+import { ConflictError, ErrorAcceso, Forbidden, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
 import { solicitarCodigo, verificarCodigo, type DepsAcceso } from '../modules/acceso.js';
+import { asignar } from '../modules/asignaciones.js';
 import { listarConjuntos } from '../modules/conjuntos.js';
-import { detalleCorreo, estadoGateway, listarCorreos } from '../modules/consultas.js';
+import {
+  detalleCorreo,
+  detalleSolicitud,
+  estadoGateway,
+  generarReporte,
+  listarCorreos,
+  listarSolicitudes,
+  listarUsuariosConjunto,
+  reporteACsv,
+  resumen,
+} from '../modules/consultas.js';
 import { cambiarConjuntoActivo, crearSesion, leerSesion, revocarSesion, type SesionActiva, type SesionPublica } from '../modules/sesiones.js';
+import { cambiarEstado, reclasificar, type Actor } from '../modules/solicitudes.js';
+import { aceptarSugerencia } from '../modules/sugerencias.js';
 
 /**
- * API HTTP. Las rutas del buzón exigen sesión (cookie `mailflow_sesion`, httpOnly) y sirven el conjunto
- * activo de la sesión; públicas: `/api/salud`, `GET /api/conjuntos`, `/api/auth/codigo` y `/api/auth/verificar`.
- * Escucha solo en 127.0.0.1 y el panel la consume por el proxy de Vite (mismo origen, sin CORS). Los POST
- * rechazan un `Origin` ajeno. Ninguna ruta de escritura de solicitudes (T2–T4) existe aún: llegan en S4.
+ * API HTTP. Las rutas protegidas exigen sesión (cookie `mailflow_sesion`, httpOnly) y operan sobre
+ * el conjunto activo de la sesión; públicas: `/api/salud`, `GET /api/conjuntos`, `/api/auth/codigo` y
+ * `/api/auth/verificar`. Escucha solo en 127.0.0.1 y el panel la consume por el proxy de Vite (sin CORS).
+ * Los POST rechazan un `Origin` ajeno.
  */
 
 declare module 'fastify' {
@@ -32,6 +45,8 @@ export interface OpcionesApp {
     /** Orígenes aceptados en los POST (p. ej. `http://localhost:5173`). */
     origenesPermitidos: ReadonlySet<string>;
   };
+  /** Límite de peticiones por IP para las rutas de acceso OTP (opcional; recomendado en producción). */
+  limitePeticiones?: { max: number; ventanaMs: number; ahora?: () => number };
   /** Para errores 500: recibe solo tipo y código, nunca el mensaje (puede traer datos personales). */
   registrarError?: (descripcion: string) => void;
 }
@@ -61,10 +76,41 @@ function numero(v: unknown): number | undefined {
   return v === undefined || v === '' ? undefined : Number(v);
 }
 
-export function construirApp({ pool, hostsPermitidos, acceso, registrarError = console.error }: OpcionesApp): FastifyInstance {
+const texto = (v: unknown): string | undefined => (v === '' ? undefined : (v as string | undefined));
+
+const actorDe = (s: SesionActiva): Actor => ({
+  idUsuario: s.idUsuario,
+  rol: s.usuario.rol,
+  idConjunto: s.idConjuntoActivo,
+});
+
+const versionDe = (b: Record<string, unknown>): unknown => b.versionEsperada ?? b.version;
+
+/** Limitador simple en memoria por IP (ventana fija) para rutas de acceso OTP. */
+function crearLimitadorIp(cfg?: OpcionesApp['limitePeticiones']) {
+  if (!cfg) return undefined;
+  const ahora = cfg.ahora ?? Date.now;
+  const contadores = new Map<string, { n: number; vence: number }>();
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    const t = ahora();
+    const ip = req.ip || '127.0.0.1';
+    const actual = contadores.get(ip);
+    if (!actual || actual.vence <= t) {
+      contadores.set(ip, { n: 1, vence: t + cfg.ventanaMs });
+      return;
+    }
+    if (actual.n >= cfg.max) {
+      return reply.code(429).send({ error: 'Demasiadas peticiones; intenta más tarde', codigo: 'LIMITE_IP' });
+    }
+    actual.n += 1;
+  };
+}
+
+export function construirApp({ pool, hostsPermitidos, acceso, limitePeticiones, registrarError = console.error }: OpcionesApp): FastifyInstance {
   const { cookieSegura, origenesPermitidos, ...deps } = acceso;
   const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
   void app.register(fastifyCookie);
+  const limitarIp = crearLimitadorIp(limitePeticiones);
 
   const opcionesCookie = { httpOnly: true, sameSite: 'lax', path: '/api', secure: cookieSegura } as const;
   const sesionPublica = ({ usuario, conjuntoActivo, conjuntos, ultimaActividad }: SesionActiva): SesionPublica => ({
@@ -93,9 +139,11 @@ export function construirApp({ pool, hostsPermitidos, acceso, registrarError = c
 
   app.get('/api/conjuntos', async () => listarConjuntos(pool));
 
-  app.post('/api/auth/codigo', async (req) => solicitarCodigo(pool, deps, (req.body ?? {}) as never));
+  const conLimiteIp = limitarIp ? { preHandler: limitarIp } : {};
 
-  app.post('/api/auth/verificar', async (req, reply: FastifyReply) => {
+  app.post('/api/auth/codigo', conLimiteIp, async (req) => solicitarCodigo(pool, deps, (req.body ?? {}) as never));
+
+  app.post('/api/auth/verificar', conLimiteIp, async (req, reply: FastifyReply) => {
     const { idUsuario, idConjunto } = await verificarCodigo(pool, deps, (req.body ?? {}) as never);
     const { token, sesion } = await crearSesion(pool, { idUsuario, idConjunto });
     return reply.setCookie(COOKIE, token, opcionesCookie).send(sesion);
@@ -127,12 +175,120 @@ export function construirApp({ pool, hostsPermitidos, acceso, registrarError = c
 
   app.get('/api/gateway/estado', protegida, async (req) => estadoGateway(pool, req.sesion.idConjuntoActivo));
 
+  app.get('/api/solicitudes', protegida, async (req) => {
+    const q = req.query as Record<string, unknown>;
+    return listarSolicitudes(
+      pool,
+      req.sesion.idConjuntoActivo,
+      {
+        estado: texto(q.estado) as never,
+        categoria: texto(q.categoria) as never,
+        prioridad: texto(q.prioridad) as never,
+        idResponsable: numero(q.idResponsable),
+        limite: numero(q.limite),
+        desplazamiento: numero(q.desplazamiento),
+      },
+      actorDe(req.sesion),
+    );
+  });
+
+  app.get('/api/solicitudes/:id', protegida, async (req) =>
+    detalleSolicitud(pool, req.sesion.idConjuntoActivo, Number((req.params as { id: string }).id), actorDe(req.sesion)),
+  );
+
+  app.post('/api/solicitudes/:id/asignar', protegida, async (req) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    return asignar(
+      pool,
+      {
+        idSolicitud: Number((req.params as { id: string }).id),
+        idResponsable: b.idResponsable as number,
+        idAsignador: req.sesion.idUsuario,
+        versionEsperada: versionDe(b) as number,
+      },
+      undefined,
+      actorDe(req.sesion),
+    );
+  });
+
+  app.post('/api/solicitudes/:id/estado', protegida, async (req) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    return cambiarEstado(
+      pool,
+      {
+        idSolicitud: Number((req.params as { id: string }).id),
+        nuevoEstado: b.nuevoEstado as never,
+        idUsuario: req.sesion.idUsuario,
+        versionEsperada: versionDe(b) as number,
+        comentario: b.comentario as string | undefined,
+      },
+      undefined,
+      actorDe(req.sesion),
+    );
+  });
+
+  app.post('/api/solicitudes/:id/reclasificar', protegida, async (req) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    return reclasificar(
+      pool,
+      {
+        idSolicitud: Number((req.params as { id: string }).id),
+        categoria: b.categoria as never,
+        prioridad: b.prioridad as never,
+        idUsuario: req.sesion.idUsuario,
+        versionEsperada: versionDe(b) as number,
+        comentario: b.comentario as string | undefined,
+      },
+      undefined,
+      actorDe(req.sesion),
+    );
+  });
+
+  app.post('/api/solicitudes/:id/aceptar-sugerencia', protegida, async (req) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    return aceptarSugerencia(
+      pool,
+      {
+        idSolicitud: Number((req.params as { id: string }).id),
+        idUsuario: req.sesion.idUsuario,
+        versionEsperada: versionDe(b) as number,
+        comentario: b.comentario as string | undefined,
+      },
+      actorDe(req.sesion),
+    );
+  });
+
+  app.get('/api/usuarios', protegida, async (req) => {
+    if (req.sesion.usuario.rol !== 'ADMIN') throw new Forbidden('Solo un administrador puede listar el personal');
+    const q = req.query as Record<string, unknown>;
+    return listarUsuariosConjunto(pool, req.sesion.idConjuntoActivo, { rol: texto(q.rol) as never });
+  });
+
+  app.get('/api/resumen', protegida, async (req) => resumen(pool, req.sesion.idConjuntoActivo));
+
+  app.get('/api/reportes', protegida, async (req, reply) => {
+    if (req.sesion.usuario.rol !== 'ADMIN') throw new Forbidden('Solo un administrador puede consultar reportes');
+    const q = req.query as Record<string, unknown>;
+    const reporte = await generarReporte(pool, req.sesion.idConjuntoActivo, {
+      desde: texto(q.desde) as never,
+      hasta: texto(q.hasta) as never,
+    });
+    if (q.formato === 'csv') {
+      return reply
+        .header('content-type', 'text/csv; charset=utf-8')
+        .header('content-disposition', 'attachment; filename="reporte-solicitudes.csv"')
+        .send(reporteACsv(reporte));
+    }
+    return reporte;
+  });
+
   app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Ruta no encontrada' }));
 
   app.setErrorHandler((err: unknown, _req, reply) => {
     if (err instanceof ErrorAcceso) {
       return reply.code(err.estado).send({ error: MENSAJES_ACCESO[err.codigo], codigo: err.codigo, ...err.detalle });
     }
+    if (err instanceof Forbidden) return reply.code(403).send({ error: err.message });
     if (err instanceof NotFound) return reply.code(404).send({ error: err.message });
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.message });
     if (err instanceof TransicionInvalida || err instanceof ValidationError) return reply.code(422).send({ error: err.message });

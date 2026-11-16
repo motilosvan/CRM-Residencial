@@ -1,14 +1,15 @@
 import sql from 'mssql';
 import { z } from 'zod';
 import { withTx } from '../db/withTx.js';
-import { ConflictError, ValidationError } from '../errors.js';
+import { ConflictError, Forbidden, ValidationError } from '../errors.js';
 import { paso, type Hooks } from './hooks.js';
 import {
   bloquearSolicitud,
   liberarAsignacionVigente,
   registrarHistorial,
   validar,
-  verificarUsuarioActivo,
+  verificarMembresiaActiva,
+  type Actor,
 } from './solicitudes.js';
 
 const id = z.number().int().positive();
@@ -33,15 +34,23 @@ export type ResultadoAsignacion =
  * Si el responsable ya es el vigente es una operación sin efecto. El índice único filtrado de la BD
  * es la última defensa contra dos vigentes; el trigger exige responsable en ASIGNADA.
  */
-export async function asignar(pool: sql.ConnectionPool, entrada: Asignacion, hooks?: Hooks): Promise<ResultadoAsignacion> {
+export async function asignar(
+  pool: sql.ConnectionPool,
+  entrada: Asignacion,
+  hooks?: Hooks,
+  actor?: Actor,
+): Promise<ResultadoAsignacion> {
   const p = validar(AsignacionSchema, entrada);
   return withTx(pool, async (tx) => {
-    const sol = await bloquearSolicitud(tx, p.idSolicitud, p.versionEsperada);
+    const sol = await bloquearSolicitud(tx, p.idSolicitud, p.versionEsperada, actor?.idConjunto);
+    if (actor && actor.rol !== 'ADMIN') {
+      throw new Forbidden('Solo un administrador puede asignar solicitudes');
+    }
     if (!['NUEVA', 'ASIGNADA', 'EN_PROCESO'].includes(sol.estado)) {
       throw new ValidationError(`No se puede asignar una solicitud en estado ${sol.estado}`);
     }
-    const nombreResponsable = await verificarUsuarioActivo(tx, p.idResponsable, 'responsable');
-    await verificarUsuarioActivo(tx, p.idAsignador, 'asignador');
+    const nombreResponsable = await verificarMembresiaActiva(tx, p.idResponsable, sol.idConjunto, 'responsable');
+    await verificarMembresiaActiva(tx, p.idAsignador, sol.idConjunto, 'asignador');
 
     const vigente = await tx
       .request()

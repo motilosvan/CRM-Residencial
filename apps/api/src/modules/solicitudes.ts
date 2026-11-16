@@ -4,8 +4,17 @@ import { CATEGORIAS } from '../domain/clasificador.js';
 import { ESTADOS } from '../domain/estados.js';
 import { PRIORIDADES } from '../domain/priorizador.js';
 import { withTx, type Tx } from '../db/withTx.js';
-import { ConflictError, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
+import { ConflictError, Forbidden, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
 import { paso, type Hooks } from './hooks.js';
+
+export type Rol = 'ADMIN' | 'SOPORTE';
+
+/** Contexto del actor autenticado para evaluar conjunto y permisos dentro de la transacción. */
+export interface Actor {
+  idUsuario: number;
+  rol: Rol;
+  idConjunto: number;
+}
 
 const id = z.number().int().positive();
 
@@ -25,23 +34,32 @@ interface FilaSolicitud {
   version: number;
   categoria: string;
   prioridad: string;
+  idConjunto: number;
 }
 
 /** Bloquea la fila (UPDLOCK) para que lectura-validación-escritura sea atómica entre transacciones. */
-export async function bloquearSolicitud(tx: Tx, idSolicitud: number, versionEsperada: number): Promise<FilaSolicitud> {
+export async function bloquearSolicitud(
+  tx: Tx,
+  idSolicitud: number,
+  versionEsperada: number,
+  idConjunto?: number,
+): Promise<FilaSolicitud> {
   const r = await tx
     .request()
     .input('id', sql.Int, idSolicitud)
     .query<FilaSolicitud>(
-      `SELECT s.idEstado, e.nombre AS estado, s.version, c.nombre AS categoria, p.nombre AS prioridad
+      `SELECT s.idEstado, e.nombre AS estado, s.version, c.nombre AS categoria, p.nombre AS prioridad, cor.idConjunto
          FROM SOLICITUDES AS s WITH (UPDLOCK, ROWLOCK)
+         JOIN CORREOS cor ON cor.idCorreo = s.idCorreo
          JOIN ESTADOS e ON e.idEstado = s.idEstado
          JOIN CATEGORIAS c ON c.idCategoria = s.idCategoria
          JOIN PRIORIDADES p ON p.idPrioridad = s.idPrioridad
         WHERE s.idSolicitud = @id`,
     );
   const fila = r.recordset[0];
-  if (!fila) throw new NotFound(`La solicitud ${idSolicitud} no existe`);
+  if (!fila || (idConjunto !== undefined && fila.idConjunto !== idConjunto)) {
+    throw new NotFound(`La solicitud ${idSolicitud} no existe`);
+  }
   if (fila.version !== versionEsperada) {
     throw new ConflictError(
       `La solicitud ${idSolicitud} cambió (versión ${fila.version}, se esperaba ${versionEsperada}). Recárguela.`,
@@ -59,6 +77,39 @@ export async function verificarUsuarioActivo(tx: Tx, idUsuario: number, papel = 
   const u = r.recordset[0];
   if (!u?.activo) throw new ValidationError(`El ${papel} ${idUsuario} no existe o está inactivo`);
   return u.nombre;
+}
+
+/** Exige usuario activo con membresía activa en el conjunto (evita que 50026 llegue como 500). */
+export async function verificarMembresiaActiva(
+  tx: Tx,
+  idUsuario: number,
+  idConjunto: number,
+  papel = 'usuario',
+): Promise<string> {
+  const r = await tx
+    .request()
+    .input('u', sql.Int, idUsuario)
+    .input('c', sql.Int, idConjunto)
+    .query<{ nombre: string; activo: boolean; membresiaActiva: boolean }>(
+      `SELECT u.nombre, u.activo, COALESCE(m.activo, 0) AS membresiaActiva
+         FROM USUARIOS u
+         LEFT JOIN USUARIO_CONJUNTOS m ON m.idUsuario = u.idUsuario AND m.idConjunto = @c
+        WHERE u.idUsuario = @u`,
+    );
+  const u = r.recordset[0];
+  if (!u?.activo) throw new ValidationError(`El ${papel} ${idUsuario} no existe o está inactivo`);
+  if (!u.membresiaActiva) throw new ValidationError(`El ${papel} ${idUsuario} no pertenece a este conjunto o está inactivo`);
+  return u.nombre;
+}
+
+/** Indica si `idUsuario` tiene la asignación vigente (sin liberar) de la solicitud. */
+export async function esResponsableVigente(tx: Tx, idSolicitud: number, idUsuario: number): Promise<boolean> {
+  const r = await tx
+    .request()
+    .input('id', sql.Int, idSolicitud)
+    .input('u', sql.Int, idUsuario)
+    .query('SELECT 1 AS ok FROM ASIGNACIONES WHERE idSolicitud = @id AND idUsuario = @u AND liberadaEn IS NULL');
+  return r.recordset.length > 0;
 }
 
 export async function liberarAsignacionVigente(tx: Tx, idSolicitud: number): Promise<void> {
@@ -101,11 +152,20 @@ export type CambioEstado = z.input<typeof CambioEstadoSchema>;
  * - ASIGNADA solo se alcanza con T2 (asignar): nunca hay una solicitud ASIGNADA sin responsable.
  * - Pasar a NUEVA (desasignar) o a un estado final libera la asignación vigente.
  */
-export async function cambiarEstado(pool: sql.ConnectionPool, entrada: CambioEstado, hooks?: Hooks) {
+export async function cambiarEstado(
+  pool: sql.ConnectionPool,
+  entrada: CambioEstado,
+  hooks?: Hooks,
+  actor?: Actor,
+) {
   const p = validar(CambioEstadoSchema, entrada);
   return withTx(pool, async (tx) => {
-    const sol = await bloquearSolicitud(tx, p.idSolicitud, p.versionEsperada);
+    const sol = await bloquearSolicitud(tx, p.idSolicitud, p.versionEsperada, actor?.idConjunto);
     await verificarUsuarioActivo(tx, p.idUsuario);
+    if (actor && actor.rol !== 'ADMIN') {
+      const asignada = await esResponsableVigente(tx, p.idSolicitud, actor.idUsuario);
+      if (!asignada) throw new Forbidden('Solo puedes cambiar el estado de tus solicitudes asignadas');
+    }
 
     const destino = await tx
       .request()
@@ -180,10 +240,18 @@ export type Reclasificacion = z.input<typeof ReclasificacionSchema>;
  * T4 — Reclasificar manualmente (corrige al clasificador). Deja historial con lo que cambió.
  * Si no cambia nada, no toca la BD (no sube la versión: evita 409 espurios a otros usuarios).
  */
-export async function reclasificar(pool: sql.ConnectionPool, entrada: Reclasificacion, hooks?: Hooks) {
+export async function reclasificar(
+  pool: sql.ConnectionPool,
+  entrada: Reclasificacion,
+  hooks?: Hooks,
+  actor?: Actor,
+) {
   const p = validar(ReclasificacionSchema, entrada);
   return withTx(pool, async (tx) => {
-    const sol = await bloquearSolicitud(tx, p.idSolicitud, p.versionEsperada);
+    const sol = await bloquearSolicitud(tx, p.idSolicitud, p.versionEsperada, actor?.idConjunto);
+    if (actor && actor.rol !== 'ADMIN') {
+      throw new Forbidden('Solo un administrador puede reclasificar solicitudes');
+    }
     if (sol.estado === 'CERRADA') throw new ValidationError('Una solicitud CERRADA no se reclasifica');
     await verificarUsuarioActivo(tx, p.idUsuario);
 
