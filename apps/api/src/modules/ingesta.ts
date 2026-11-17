@@ -3,6 +3,7 @@ import sql from 'mssql';
 import { z } from 'zod';
 import { clasificar, type Categoria } from '../domain/clasificador.js';
 import { priorizar, type Prioridad } from '../domain/priorizador.js';
+import { analizarSeguridadSeguro, RESULTADOS_AUTENTICACION, type NivelRiesgo } from '../domain/seguridad.js';
 import { sqlErrorNumber, withTx, type Tx } from '../db/withTx.js';
 import { paso, type Hooks } from './hooks.js';
 
@@ -30,6 +31,25 @@ function normalizarRemitente(r: string | undefined): string {
   return /^[^\s@]+@[^\s@]+$/.test(limpio) && limpio.length <= 320 ? limpio : REMITENTE_DESCONOCIDO;
 }
 
+const recortado = (max: number) => z.string().transform((s) => truncarUtf16(s, max));
+const hasta = <T extends z.ZodType>(item: T, max: number) => z.array(item).transform((xs) => xs.slice(0, max));
+/** Un resultado de autenticación desconocido se ignora en vez de rechazar el correo. */
+const resultadoAuth = z.enum(RESULTADOS_AUTENTICACION).optional().catch(undefined);
+
+/**
+ * Evidencia de seguridad que extrae el gateway del correo crudo (cabeceras, enlaces del HTML, adjuntos).
+ * Lo que excede los topes se recorta, nunca se rechaza: un correo con 10.000 enlaces no puede tumbar la ingesta.
+ */
+export const EvidenciaSchema = z.object({
+  nombreRemitente: recortado(300).optional(),
+  responderA: hasta(recortado(320), 10).optional(),
+  autenticacion: z.object({ spf: resultadoAuth, dkim: resultadoAuth, dmarc: resultadoAuth }).optional(),
+  enlaces: hasta(z.object({ url: recortado(2048), texto: recortado(300).optional() }), 200).optional(),
+  adjuntos: hasta(z.object({ nombre: recortado(255), tipo: recortado(100).optional() }), 100).optional(),
+  mimeIlegible: z.boolean().optional(),
+});
+export type Evidencia = z.input<typeof EvidenciaSchema>;
+
 /**
  * Entrada de T1. Regla 8: un correo nunca se descarta por su contenido. Lo que no cabe se recorta
  * y lo que no es válido se normaliza. Lo único obligatorio es un messageId (el gateway sintetiza uno
@@ -47,6 +67,8 @@ export const CorreoEntranteSchema = z.object({
    * el clasificador, para no bloquear el buzón (regla 8). Un humano lo reclasifica después (T4).
    */
   sinClasificar: z.boolean().default(false),
+  /** Sin evidencia (ingesta manual), el análisis de seguridad usa solo remitente, asunto y cuerpo. */
+  evidencia: EvidenciaSchema.optional(),
   /** T6: avance del checkpoint IMAP, en la MISMA transacción que el correo. */
   checkpoint: z
     .object({
@@ -67,6 +89,8 @@ export type ResultadoIngesta =
       categoria: Categoria;
       prioridad: Prioridad;
       idResidente: number | null;
+      riesgo: NivelRiesgo;
+      puntajeRiesgo: number;
     };
 
 /** 2601 = índice único; 2627 = restricción UNIQUE/PK. */
@@ -106,7 +130,7 @@ async function avanzarCheckpoint(tx: Tx, c: NonNullable<z.output<typeof CorreoEn
 }
 
 /**
- * T1 — Ingesta idempotente: correo → solicitud NUEVA + historial inicial (+ checkpoint).
+ * T1 — Ingesta idempotente: correo → análisis de seguridad + solicitud NUEVA + historial inicial (+ checkpoint).
  * Todo en una transacción. Reprocesar el mismo messageId (reinicio, reintento, carrera) devuelve
  * `{ duplicado: true }` sin crear nada: la unicidad la garantiza la BD, no el código.
  */
@@ -119,6 +143,8 @@ export async function ingestarCorreo(
   const { categoria, prioridad } = c.sinClasificar
     ? ({ categoria: 'SIN_CLASIFICAR', prioridad: 'MEDIA' } as const)
     : clasificarSeguro(c.asunto, c.cuerpo);
+  // Fuera de la transacción: es puro y withTx puede repetir su función. Nunca lanza.
+  const analisis = analizarSeguridadSeguro({ ...c.evidencia, remitente: c.remitente, asunto: c.asunto, texto: c.cuerpo });
 
   return withTx(pool, async (tx) => {
     let insertado;
@@ -145,6 +171,20 @@ export async function ingestarCorreo(
     }
     const { idCorreo, idResidente } = insertado.recordset[0]!;
     await paso(hooks, 'correo');
+
+    // Análisis de seguridad en la misma transacción: no existe un correo sin análisis.
+    await tx
+      .request()
+      .input('idCorreo', sql.Int, idCorreo)
+      .input('nivel', sql.VarChar(10), analisis.nivel)
+      .input('puntaje', sql.TinyInt, analisis.puntaje)
+      .input('senales', sql.NVarChar(sql.MAX), JSON.stringify(analisis.senales))
+      .input('version', sql.VarChar(20), analisis.version)
+      .query(
+        `INSERT INTO ANALISIS_SEGURIDAD (idCorreo, nivel, puntaje, senales, versionDetector)
+         VALUES (@idCorreo, @nivel, @puntaje, @senales, @version)`,
+      );
+    await paso(hooks, 'seguridad');
 
     // Si el catálogo no tuviera la categoría/prioridad calculada, se cae a SIN_CLASIFICAR/MEDIA
     // en vez de perder el correo por un NULL. SOLICITUDES tiene trigger: SQL Server exige OUTPUT ... INTO.
@@ -183,6 +223,15 @@ export async function ingestarCorreo(
     if (c.checkpoint) await avanzarCheckpoint(tx, c.checkpoint);
     await paso(hooks, 'checkpoint');
 
-    return { duplicado: false, idCorreo, idSolicitud, categoria, prioridad, idResidente } as const;
+    return {
+      duplicado: false,
+      idCorreo,
+      idSolicitud,
+      categoria,
+      prioridad,
+      idResidente,
+      riesgo: analisis.nivel,
+      puntajeRiesgo: analisis.puntaje,
+    } as const;
   });
 }

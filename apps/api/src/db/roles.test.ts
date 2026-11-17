@@ -85,4 +85,12 @@ describe('rol crm_app (mínimo privilegio)', () => {
     expect(r[0]?.n).toBe(1);
     expect(await db.q(`SELECT 1 AS x FROM sys.triggers WHERE name = 'TR_Historial_inmutable' AND is_disabled = 0`)).toHaveLength(1);
   });
+
+  // Después de "nada de lo anterior": crea un correo (y su historial).
+  it('el análisis de seguridad se inserta con T1 pero no se puede alterar ni borrar', async () => {
+    const r = await ingestarCorreo(app, { messageId: '<rol-seg@x>', remitente: 'x@evil.com', asunto: 'a', cuerpo: 'http://10.0.0.1/x' });
+    expect(r).toMatchObject({ duplicado: false, riesgo: 'BAJO', puntajeRiesgo: 20 });
+    await expect(comoApp(`UPDATE ANALISIS_SEGURIDAD SET nivel = 'BAJO', puntaje = 0`)).rejects.toThrow(/permission was denied|denegado/i);
+    await expect(comoApp(`DELETE FROM ANALISIS_SEGURIDAD`)).rejects.toThrow(/permission was denied|denegado/i);
+  });
 });

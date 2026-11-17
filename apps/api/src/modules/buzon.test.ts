@@ -99,6 +99,33 @@ describe('Buzón · checkpoint y estado del gateway', () => {
   });
 });
 
+describe('Buzón · riesgo de seguridad', () => {
+  it('cada correo trae su nivel de riesgo; el filtro "sospechosos" deja solo MEDIO y ALTO', async () => {
+    await ingestarCorreo(db.pool, {
+      messageId: '<buz-phishing@mail>', remitente: 'alertas@bancolombia-seguridad.com', asunto: 'Su cuenta será bloqueada',
+      cuerpo: 'Verifique su clave aquí: https://bit.ly/bco',
+      evidencia: { nombreRemitente: 'Bancolombia', autenticacion: { dmarc: 'fail' } },
+    });
+    const todos = await listarCorreos(db.pool);
+    expect(todos.correos.find((c) => c.asunto === 'Fuga de agua en el baño')).toMatchObject({ riesgo: 'BAJO', puntajeRiesgo: 0 });
+    const sospechosos = await listarCorreos(db.pool, { sospechosos: true });
+    expect(sospechosos.total).toBe(1);
+    expect(sospechosos.correos[0]).toMatchObject({ asunto: 'Su cuenta será bloqueada', riesgo: 'ALTO' });
+    expect((await listarCorreos(db.pool, { sospechosos: true, q: 'fuga' })).total).toBe(0);
+  });
+
+  it('el detalle explica el riesgo con sus señales, sin direcciones completas', async () => {
+    const { correos } = await listarCorreos(db.pool, { sospechosos: true });
+    const d = await detalleCorreo(db.pool, correos[0]!.id);
+    expect(d.senalesRiesgo.map((s) => s.codigo)).toEqual(
+      expect.arrayContaining(['AUTENTICACION_FALLIDA', 'DOMINIO_PARECIDO', 'PEDIDO_CREDENCIALES', 'ENLACE_ACORTADO']),
+    );
+    for (const s of d.senalesRiesgo) expect(s.detalle).not.toContain('@');
+    const normal = (await listarCorreos(db.pool, { q: 'fuga' })).correos[0]!;
+    expect((await detalleCorreo(db.pool, normal.id)).senalesRiesgo).toEqual([]);
+  });
+});
+
 describe('T1 · sinClasificar (respaldo del gateway)', () => {
   it('guarda SIN_CLASIFICAR/MEDIA aunque el texto sea clasificable', async () => {
     const r = await ingestarCorreo(db.pool, {

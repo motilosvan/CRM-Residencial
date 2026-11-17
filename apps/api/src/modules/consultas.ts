@@ -4,6 +4,7 @@ import { CATEGORIAS } from '../domain/clasificador.js';
 import { enmascarar } from '../domain/enmascarar.js';
 import { destinosDesde, ESTADOS, type Estado } from '../domain/estados.js';
 import { PRIORIDADES } from '../domain/priorizador.js';
+import type { NivelRiesgo, Senal } from '../domain/seguridad.js';
 import { withTx } from '../db/withTx.js';
 import { NotFound } from '../errors.js';
 import { validar } from './solicitudes.js';
@@ -131,7 +132,8 @@ const BUZON = `
          c.idResidente, r.nombre AS residente, r.unidad,
          s.idSolicitud, 'SOL-' + RIGHT('000000' + CAST(s.idSolicitud AS VARCHAR(10)), 6) AS codigo,
          e.nombre AS estado, cat.nombre AS categoria, p.nombre AS prioridad,
-         sug.estado AS sugerenciaEstado, catSug.nombre AS sugerenciaCategoria`;
+         sug.estado AS sugerenciaEstado, catSug.nombre AS sugerenciaCategoria,
+         an.nivel AS riesgo, an.puntaje AS puntajeRiesgo`;
 
 const BUZON_FROM = `
     FROM CORREOS c
@@ -141,11 +143,13 @@ const BUZON_FROM = `
     LEFT JOIN CATEGORIAS cat ON cat.idCategoria = s.idCategoria
     LEFT JOIN PRIORIDADES p ON p.idPrioridad = s.idPrioridad
     LEFT JOIN SUGERENCIAS_IA sug ON sug.idSolicitud = s.idSolicitud
-    LEFT JOIN CATEGORIAS catSug ON catSug.idCategoria = sug.idCategoria`;
+    LEFT JOIN CATEGORIAS catSug ON catSug.idCategoria = sug.idCategoria
+    LEFT JOIN ANALISIS_SEGURIDAD an ON an.idCorreo = c.idCorreo`;
 
 const BUZON_FILTRO = `
    WHERE (@patron IS NULL OR c.asunto LIKE @patron ESCAPE '\\' OR c.remitente LIKE @patron ESCAPE '\\'
-          OR r.nombre LIKE @patron ESCAPE '\\')`;
+          OR r.nombre LIKE @patron ESCAPE '\\')
+     AND (@sospechosos = 0 OR an.nivel IN ('MEDIO', 'ALTO'))`;
 
 export interface FilaCorreo {
   id: number;
@@ -162,6 +166,9 @@ export interface FilaCorreo {
   prioridad: string | null;
   sugerenciaEstado: EstadoSugerencia | null;
   sugerenciaCategoria: string | null;
+  /** Análisis de seguridad de T1 (null solo en correos anteriores a la migración 0007). */
+  riesgo: NivelRiesgo | null;
+  puntajeRiesgo: number | null;
 }
 
 export type EstadoSugerencia = 'EN_REINTENTO' | 'LISTA' | 'FALLIDA';
@@ -183,8 +190,21 @@ export const FiltroCorreosSchema = z.object({
   q: z.string().trim().max(200).optional(),
   limite: z.number().int().min(1).max(200).default(50),
   desplazamiento: z.number().int().min(0).default(0),
+  /** Solo los de riesgo MEDIO o ALTO (posible phishing, fraude, adjuntos peligrosos...). */
+  sospechosos: z.boolean().default(false),
 });
 export type FiltroCorreos = z.input<typeof FiltroCorreosSchema>;
+
+/** Las señales se guardaron como JSON por T1; si algo no cuadra, el panel muestra el nivel sin detalle. */
+function senalesDe(json: string | null): Senal[] {
+  if (!json) return [];
+  try {
+    const v: unknown = JSON.parse(json);
+    return Array.isArray(v) ? (v as Senal[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 /** `%`, `_` y `[` son comodines de LIKE: se escapan para que el texto se busque literal. */
 function patronLike(q: string | undefined): string | null {
@@ -205,12 +225,14 @@ export async function listarCorreos(
         await tx
           .request()
           .input('patron', sql.NVarChar(450), patron)
+          .input('sospechosos', sql.Bit, f.sospechosos)
           .query<{ total: number }>(`SELECT COUNT(*) AS total ${BUZON_FROM} ${BUZON_FILTRO}`)
       ).recordset[0]!.total;
       const correos = (
         await tx
           .request()
           .input('patron', sql.NVarChar(450), patron)
+          .input('sospechosos', sql.Bit, f.sospechosos)
           .input('lim', sql.Int, f.limite)
           .input('desp', sql.Int, f.desplazamiento)
           .query<FilaCorreo & { extracto: string }>(
@@ -226,26 +248,29 @@ export async function listarCorreos(
 }
 
 /**
- * Un correo completo: el cuerpo, su versión enmascarada (exactamente lo que vería un tercero) y la
- * sugerencia de IA, si existe, todo de la misma foto consistente.
+ * Un correo completo: el cuerpo, su versión enmascarada (exactamente lo que vería un tercero), el análisis
+ * de seguridad con sus señales y la sugerencia de IA, si existe, todo de la misma foto consistente.
  */
 export async function detalleCorreo(
   pool: sql.ConnectionPool,
   idCorreo: number,
-): Promise<FilaCorreo & { cuerpo: string; cuerpoEnmascarado: string; sugerencia: SugerenciaGuardada | null }> {
+): Promise<
+  FilaCorreo & { cuerpo: string; cuerpoEnmascarado: string; senalesRiesgo: Senal[]; sugerencia: SugerenciaGuardada | null }
+> {
   const id = validar(z.number().int().positive(), idCorreo);
   return withTx(
     pool,
     async (tx) => {
-      const fila = (
+      const resultado = (
         await tx
           .request()
           .input('id', sql.Int, id)
-          .query<FilaCorreo & { cuerpo: string }>(
-            `${BUZON}, COALESCE(c.cuerpo, N'') AS cuerpo ${BUZON_FROM} WHERE c.idCorreo = @id`,
+          .query<FilaCorreo & { cuerpo: string; senalesJson: string | null }>(
+            `${BUZON}, COALESCE(c.cuerpo, N'') AS cuerpo, an.senales AS senalesJson ${BUZON_FROM} WHERE c.idCorreo = @id`,
           )
       ).recordset[0];
-      if (!fila) throw new NotFound(`El correo ${id} no existe`);
+      if (!resultado) throw new NotFound(`El correo ${id} no existe`);
+      const { senalesJson, ...fila } = resultado;
       const sugerencia = (
         await tx
           .request()
@@ -262,6 +287,7 @@ export async function detalleCorreo(
       return {
         ...fila,
         cuerpoEnmascarado: enmascarar(fila.cuerpo, { nombres: [fila.residente] }),
+        senalesRiesgo: senalesDe(senalesJson),
         sugerencia: sugerencia ?? null,
       };
     },

@@ -29,6 +29,14 @@ function numero(v: unknown): number | undefined {
   return v === undefined || v === '' ? undefined : Number(v);
 }
 
+/** `?x=1|true` ⇒ true; `0|false|` vacío ⇒ false; ausente ⇒ undefined; cualquier otro valor llega tal cual y el esquema lo rechaza (422). */
+function booleano(v: unknown): unknown {
+  if (v === undefined) return undefined;
+  if (v === '1' || v === 'true') return true;
+  if (v === '0' || v === 'false' || v === '') return false;
+  return v;
+}
+
 export function construirApp({ pool, hostsPermitidos, registrarError = console.error }: OpcionesApp): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
 
@@ -40,13 +48,14 @@ export function construirApp({ pool, hostsPermitidos, registrarError = console.e
 
   app.get('/api/salud', async () => ({ ok: true }));
 
-  /** Buzón unificado: todos los correos recibidos, más recientes primero. ?q=&limite=&desplazamiento= */
+  /** Buzón unificado: todos los correos recibidos, más recientes primero. ?q=&limite=&desplazamiento=&sospechosos=1 */
   app.get('/api/correos', async (req) => {
     const q = req.query as Record<string, unknown>;
     return listarCorreos(pool, {
       q: q.q === '' ? undefined : (q.q as string | undefined),
       limite: numero(q.limite),
       desplazamiento: numero(q.desplazamiento),
+      sospechosos: booleano(q.sospechosos) as boolean | undefined,
     });
   });
 

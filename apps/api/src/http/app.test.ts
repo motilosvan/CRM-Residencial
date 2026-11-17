@@ -45,6 +45,13 @@ describe('API · buzón', () => {
     expect((await get('/api/correos?limite=abc')).statusCode).toBe(422);
     expect((await get('/api/correos?limite=500')).statusCode).toBe(422);
     expect((await get('/api/correos?q=a&q=b')).statusCode).toBe(422);
+    // Solo sospechosos: los dos correos de prueba son normales.
+    expect((await get('/api/correos?sospechosos=1')).json<{ total: number }>().total).toBe(0);
+    expect((await get('/api/correos?sospechosos=false')).json<{ total: number }>().total).toBe(2);
+    expect((await get('/api/correos?sospechosos=quizas')).statusCode).toBe(422);
+    const fila = (await get('/api/correos')).json<{ correos: Record<string, unknown>[] }>().correos[0]!;
+    expect(fila).toMatchObject({ riesgo: 'BAJO', puntajeRiesgo: 0 });
+    expect((await get(`/api/correos/${fila.id as number}`)).json()).toMatchObject({ riesgo: 'BAJO', senalesRiesgo: [] });
   });
 
   it('GET /api/correos/:id devuelve el cuerpo completo; 404 si no existe; 422 si el id no es válido', async () => {

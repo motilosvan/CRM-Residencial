@@ -55,6 +55,7 @@ async function foto() {
   const t = (tabla: string, orden: string) => db.q(`SELECT * FROM ${tabla} ORDER BY ${orden}`);
   return JSON.stringify([
     await t('CORREOS', 'idCorreo'),
+    await t('ANALISIS_SEGURIDAD', 'idAnalisis'),
     await t('SOLICITUDES', 'idSolicitud'),
     await t('ASIGNACIONES', 'idAsignacion'),
     await t('HISTORIAL_ESTADOS', 'idHistorial'),
@@ -343,7 +344,7 @@ describe('S2-06 · atomicidad: un fallo a mitad de cualquier transacción no dej
     },
   });
 
-  it.each(['correo', 'solicitud', 'historial', 'checkpoint'])('T1 ingesta: fallo tras "%s" → rollback total', async (punto) => {
+  it.each(['correo', 'seguridad', 'solicitud', 'historial', 'checkpoint'])('T1 ingesta: fallo tras "%s" → rollback total', async (punto) => {
     const antes = await foto();
     await expect(
       ingestarCorreo(
