@@ -78,6 +78,8 @@ export function filtrarMayores(uids: readonly number[], uid: number): number[] {
 export class FuenteImap implements FuenteCorreo {
   private cliente: ImapFlow | null = null;
   private liberar: (() => void) | null = null;
+  private abriendo = false;
+  private cerradoAbriendo = false;
 
   /**
    * `marcarLeido` falso (por defecto) abre la carpeta en solo lectura. `esperaMs` acota la conexión, el
@@ -108,15 +110,21 @@ export class FuenteImap implements FuenteCorreo {
     // Sin este listener, un error de socket en segundo plano tumbaría el proceso; la operación en curso falla igual.
     cliente.on('error', () => {});
     this.cliente = cliente;
+    this.abriendo = true;
+    this.cerradoAbriendo = false;
     try {
       await cliente.connect();
+      if (this.cerradoAbriendo) throw new Error('FuenteImap: cerrada mientras se abría');
       // Si no se marcan leídos, el buzón se abre en solo lectura (EXAMINE): el gateway no altera Gmail.
       const lock = await cliente.getMailboxLock(this.cfg.buzon, { readOnly: !this.opciones.marcarLeido });
       this.liberar = () => lock.release();
+      if (this.cerradoAbriendo) throw new Error('FuenteImap: cerrada mientras se abría');
       const mb = cliente.mailbox;
       if (!mb) throw new Error(`No se pudo abrir el buzón ${this.cfg.buzon}`);
+      this.abriendo = false;
       return { uidValidity: Number(mb.uidValidity), uidNext: mb.uidNext };
     } catch (err) {
+      this.abriendo = false;
       // Ya autenticado pero sin buzón (carpeta mal escrita...): sin esto la sesión quedaba abierta en
       // cada ciclo y Gmail, que admite unas 15 por cuenta, terminaba rechazando todas las conexiones.
       await this.cerrar();
@@ -151,6 +159,15 @@ export class FuenteImap implements FuenteCorreo {
   }
 
   async cerrar(): Promise<void> {
+    if (this.abriendo) {
+      // `abrir()` sigue en curso (p. ej. venció la prueba de conexión): se corta el socket ya, sin LOGOUT,
+      // y `abrir()` lo detecta y falla en vez de dejar la sesión viva.
+      this.cerradoAbriendo = true;
+      const enCurso = this.cliente;
+      this.cliente = null;
+      enCurso?.close();
+      return;
+    }
     const liberar = this.liberar;
     const cliente = this.cliente;
     this.liberar = null;

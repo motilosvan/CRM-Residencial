@@ -107,6 +107,45 @@ describe('Gateway · adaptador de buzón (DepsBuzon sobre FuenteImap + sincroniz
     expect(fila!.idConjunto).toBe(idConjunto);
   });
 
+  it('ejecutarSincronizacion: un TypeError a mitad de ciclo se propaga tal cual; un ECONNRESET sí es CONEXION', async () => {
+    const buzon: BuzonActivo = { ...conexion, idConjunto, diasIniciales: 7, marcarLeido: false };
+    const error = new TypeError('bug del ciclo');
+    const reset = () => Object.assign(new Error('reset'), { code: 'ECONNRESET' });
+    const b = new BuzonFalso();
+    const fuente = b.fuente();
+    const conBug = crearAdaptadorBuzon({
+      maxPorCiclo: 50, maxIntentos: 3, ahora: () => AHORA,
+      crearFuente: () => ({ ...fuente, uidsDesde: async () => { throw error; }, uidsMayoresQue: async () => { throw error; } }),
+    });
+    const e = await conBug.ejecutarSincronizacion(db.pool, buzon).catch((x: unknown) => x);
+    expect(e).toBe(error);
+    expect(e).not.toBeInstanceOf(ErrorConexionBuzon);
+
+    const conRed = crearAdaptadorBuzon({
+      maxPorCiclo: 50, maxIntentos: 3, ahora: () => AHORA,
+      crearFuente: () => ({ ...fuente, uidsDesde: async () => { throw reset(); }, uidsMayoresQue: async () => { throw reset(); } }),
+    });
+    await expect(conRed.ejecutarSincronizacion(db.pool, buzon)).rejects.toMatchObject({ name: 'ErrorConexionBuzon', codigo: 'CONEXION' });
+  });
+
+  it('los mensajes de log de la sincronización llevan el conjunto y nunca la dirección del buzón', async () => {
+    const b = new BuzonFalso();
+    const id = b.agregar(mensajeCrudo({ id: '<adap-log@x>' }), new Date(AHORA.getTime() - 86_400_000));
+    b.rechazados.add(id);
+    const lineas: string[] = [];
+    const adaptador = crearAdaptadorBuzon({
+      maxPorCiclo: 50, maxIntentos: 2, ahora: () => AHORA, log: (m) => lineas.push(m), crearFuente: () => b.fuente(),
+    });
+    const buzon: BuzonActivo = { ...conexion, usuario: 'otro-log@demo.mailflow.test', idConjunto, diasIniciales: 7, marcarLeido: false };
+    for (let i = 0; i < 2; i++) await expect(adaptador.ejecutarSincronizacion(db.pool, buzon)).rejects.toThrow(); // el correo falla
+    await adaptador.ejecutarSincronizacion(db.pool, buzon); // agotados los intentos: se registra sin contenido y se loguea
+    expect(lineas.length).toBeGreaterThan(0);
+    for (const l of lineas) {
+      expect(l.startsWith(`Conjunto ${idConjunto}: `)).toBe(true);
+      expect(l).not.toContain('@');
+    }
+  });
+
   it('ejecutarSincronizacion traduce los fallos de conexión a ErrorConexionBuzon', async () => {
     for (const [codigo, err] of Object.entries(errores)) {
       const b = new BuzonFalso();

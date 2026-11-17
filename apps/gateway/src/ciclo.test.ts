@@ -1,5 +1,5 @@
 import sql from 'mssql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cifrarContrasena,
   ErrorConexionBuzon,
@@ -18,6 +18,10 @@ beforeAll(async () => {
   db = await setupTestDb('CorreosCRM_gwciclo');
 });
 afterAll(async () => db.close());
+// Cada prueba parte sin buzones activos, aunque la anterior haya fallado a medias.
+beforeEach(async () => {
+  await db.q('UPDATE dbo.BUZONES_CONJUNTO SET activo = 0');
+});
 
 const correoDe = (id: number) => `ciclo-${id}@demo.mailflow.test`;
 
@@ -99,7 +103,6 @@ describe('Gateway · cicloBuzones (varios buzones)', () => {
       expect(l).not.toContain('@');
       expect(l).not.toContain('clave');
     }
-    await db.q('UPDATE dbo.BUZONES_CONJUNTO SET activo = 0'); // deja la BD limpia para la siguiente prueba
   });
 
   it('un error que no es de conexión no detiene a los demás: queda INTERNO y el log no lleva su mensaje', async () => {
@@ -124,7 +127,6 @@ describe('Gateway · cicloBuzones (varios buzones)', () => {
     expect((await fila(roto)).ultimoError).toBe('INTERNO');
     expect(lineas.join('\n')).toMatch(/RequestError 547/);
     expect(lineas.join('\n')).not.toContain('datos-del-correo');
-    await db.q('UPDATE dbo.BUZONES_CONJUNTO SET activo = 0');
   });
 
   it('un buzón indescifrable queda con CLAVE y se omite (los demás siguen)', async () => {

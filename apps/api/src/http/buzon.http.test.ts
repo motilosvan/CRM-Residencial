@@ -99,6 +99,11 @@ describe('API · buzón del conjunto', () => {
     expect(r.json()).toEqual({ error: 'Origen no permitido' });
   });
 
+  it('POST sincronizar con Origin ajeno se rechaza (403) aunque la sesión sea válida', async () => {
+    const r = await req(app, 'POST', '/api/buzon/sincronizar', { cookie: cookieAdmin, payload: {}, origin: 'https://otro.example' });
+    expect(r.statusCode).toBe(403);
+  });
+
   it('sin buzón conectado, sincronizar responde 422 y desconectar 404', async () => {
     expect((await req(app, 'POST', '/api/buzon/sincronizar', { cookie: cookieSoporte, payload: {} })).statusCode).toBe(422);
     expect((await req(app, 'POST', '/api/buzon/desconectar', { cookie: cookieAdmin, payload: {} })).statusCode).toBe(404);

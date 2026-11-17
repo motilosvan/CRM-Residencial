@@ -12,6 +12,7 @@ const imap = vi.hoisted(() => ({
   falloLock: null as Error | null,
   falloLogout: null as Error | null,
   falloFetch: null as Error | null,
+  esperaConnect: null as Promise<void> | null,
   sinBuzon: false,
   opcionesCandado: [] as { readOnly?: boolean }[],
   auth: [] as { user: string; pass: string }[],
@@ -31,6 +32,7 @@ vi.mock('imapflow', () => ({
       return this;
     }
     async connect() {
+      await imap.esperaConnect;
       if (imap.falloConnect) throw imap.falloConnect;
     }
     async getMailboxLock(_buzon: string, opciones: { readOnly?: boolean }) {
@@ -64,6 +66,7 @@ beforeEach(() => {
   imap.sesiones.length = 0;
   imap.falloConnect = imap.falloLock = imap.falloLogout = imap.falloFetch = null;
   imap.sinBuzon = false;
+  imap.esperaConnect = null;
   imap.opcionesCandado.length = 0;
   imap.auth.length = 0;
   imap.opciones.length = 0;
@@ -125,6 +128,22 @@ describe('Gateway · FuenteImap abre y cierra la sesión', () => {
     expect(imap.sesiones).toHaveLength(1);
     expect(cerrada(imap.sesiones[0]!)).toBe(true);
     expect(imap.sesiones[0]!.closes).toBe(1);
+  });
+});
+
+describe('Gateway · cerrar() mientras abrir() sigue en curso', () => {
+  it('corta el socket de inmediato y abrir() falla sin dejar la sesión viva ni pedir la carpeta', async () => {
+    let conectar!: () => void;
+    imap.esperaConnect = new Promise<void>((r) => (conectar = r));
+    const f = new FuenteImap(cfg);
+    const apertura = f.abrir().catch((e: unknown) => e);
+    await f.cerrar(); // el temporizador de probarConexion vence con connect() todavía pendiente
+    expect(imap.sesiones).toEqual([{ logouts: 0, closes: 1, liberada: false }]);
+    conectar(); // el servidor responde tarde
+    expect(await apertura).toBeInstanceOf(Error);
+    expect(imap.opcionesCandado).toEqual([]);
+    await f.cerrar(); // idempotente
+    expect(imap.sesiones).toEqual([{ logouts: 0, closes: 1, liberada: false }]);
   });
 });
 
