@@ -18,10 +18,35 @@ describe('API · accesoConfigFromEnv', () => {
       secreto: SECRETO,
       smtp: null,
       adminInicialCorreo: null,
+      conjuntoInicial: null,
       cookieSegura: false,
       origenes: new Set(['http://localhost:5173', 'http://127.0.0.1:5173']),
       desarrollo: true,
     });
+  });
+
+  it('lee el conjunto inicial cuando vienen slug y nombre', () => {
+    const c = accesoConfigFromEnv({ ...base, CONJUNTO_INICIAL_SLUG: 'torres-del-sol', CONJUNTO_INICIAL_NOMBRE: '  Torres del Sol ' });
+    expect(c.conjuntoInicial).toEqual({ slug: 'torres-del-sol', nombre: 'Torres del Sol' });
+  });
+
+  it('el conjunto inicial exige ambas variables y el error nombra la que falta, no el valor', () => {
+    expect(() => accesoConfigFromEnv({ ...base, CONJUNTO_INICIAL_SLUG: 'torres-del-sol' })).toThrow(/CONJUNTO_INICIAL_NOMBRE/);
+    expect(() => accesoConfigFromEnv({ ...base, CONJUNTO_INICIAL_NOMBRE: 'Torres del Sol' })).toThrow(/CONJUNTO_INICIAL_SLUG/);
+    try {
+      accesoConfigFromEnv({ ...base, CONJUNTO_INICIAL_SLUG: 'torres-del-sol' });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as Error).message).not.toContain('torres-del-sol');
+    }
+  });
+
+  it('rechaza un slug o un nombre de conjunto inválidos sin mostrar el valor', () => {
+    for (const slug of ['Torres Del Sol', 'torres_sol', '-torres', 'torres-', 'a--b', 'a'.repeat(81)]) {
+      expect(() => accesoConfigFromEnv({ ...base, CONJUNTO_INICIAL_SLUG: slug, CONJUNTO_INICIAL_NOMBRE: 'N' })).toThrow(/CONJUNTO_INICIAL_SLUG/);
+    }
+    expect(() => accesoConfigFromEnv({ ...base, CONJUNTO_INICIAL_SLUG: 'ok', CONJUNTO_INICIAL_NOMBRE: 'n'.repeat(121) })).toThrow(/CONJUNTO_INICIAL_NOMBRE/);
+    expect(() => accesoConfigFromEnv({ ...base, CONJUNTO_INICIAL_SLUG: 'ok', CONJUNTO_INICIAL_NOMBRE: '   ' })).toThrow(/CONJUNTO_INICIAL_NOMBRE/);
   });
 
   it('exige AUTH_SECRETO y de al menos 32 caracteres; el error nombra la variable, no el valor', () => {

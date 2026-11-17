@@ -3,6 +3,7 @@ import sql from 'mssql';
 import { z } from 'zod';
 import { sqlErrorNumber, withTx, type Tx } from '../db/withTx.js';
 import { ConflictError, Forbidden, NotFound, ValidationError } from '../errors.js';
+import { registrarAuditoria } from './auditoria.js';
 import { estadoGateway } from './consultas.js';
 import { validar, type Actor, type Rol } from './solicitudes.js';
 
@@ -150,17 +151,8 @@ const ActorSchema = z.object({
   idConjunto: z.number().int().positive(),
 });
 
-async function registrarAuditoria(tx: Tx, actor: Actor, accion: 'CONECTAR' | 'DESCONECTAR', detalle: string): Promise<void> {
-  await tx
-    .request()
-    .input('c', sql.Int, actor.idConjunto)
-    .input('u', sql.Int, actor.idUsuario)
-    .input('accion', sql.VarChar(30), accion)
-    .input('detalle', sql.NVarChar(400), detalle)
-    .query(
-      `INSERT INTO AUDITORIA_ADMIN (idConjunto, idUsuario, entidad, idEntidad, accion, detalle)
-       VALUES (@c, @u, 'BUZON', @c, @accion, @detalle)`,
-    );
+function auditarBuzon(tx: Tx, actor: Actor, accion: 'CONECTAR' | 'DESCONECTAR', detalle: string): Promise<void> {
+  return registrarAuditoria(tx, { idConjunto: actor.idConjunto, idUsuario: actor.idUsuario, entidad: 'BUZON', idEntidad: actor.idConjunto, accion, detalle });
 }
 
 /* ---------- Escritura administrativa ---------- */
@@ -271,7 +263,7 @@ export async function guardarBuzon(
             WHERE idConjunto = @c`,
         );
       }
-      await registrarAuditoria(
+      await auditarBuzon(
         tx,
         actor,
         'CONECTAR',
@@ -323,7 +315,7 @@ export async function desconectarBuzon(
             SET activo = 0, version = version + 1, actualizadoEn = SYSUTCDATETIME()
           WHERE idConjunto = @c`,
       );
-    await registrarAuditoria(tx, actor, 'DESCONECTAR', 'Buzón desconectado');
+    await auditarBuzon(tx, actor, 'DESCONECTAR', 'Buzón desconectado');
   });
   return estadoGateway(pool, a.idConjunto);
 }

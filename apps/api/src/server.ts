@@ -11,7 +11,7 @@ import { accesoConfigFromEnv, dbConfigFromEnv, hostsImapPermitidosFromEnv, type 
 import { crearPool } from './db/pool.js';
 import { construirApp } from './http/app.js';
 import { EnviadorLocal, EnviadorSmtp } from './modules/enviador.js';
-import { asegurarUsuariosIniciales } from './modules/semilla.js';
+import { asegurarUsuariosIniciales, hayAdminActivo } from './modules/semilla.js';
 
 const PORT = Number(process.env.API_PORT ?? 3000);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
@@ -31,7 +31,14 @@ try {
 
 const db = dbConfigFromEnv();
 const pool = await crearPool(db);
-await asegurarUsuariosIniciales(pool, { adminCorreo: acceso.adminInicialCorreo, demo: acceso.desarrollo });
+await asegurarUsuariosIniciales(pool, {
+  adminCorreo: acceso.adminInicialCorreo,
+  conjuntoInicial: acceso.conjuntoInicial,
+  log: (mensaje) => console.warn(mensaje),
+});
+if (!acceso.desarrollo && !acceso.adminInicialCorreo && !(await hayAdminActivo(pool))) {
+  console.warn('ADVERTENCIA: no hay ningún administrador activo y ADMIN_INICIAL_CORREO no está definido: nadie podrá iniciar sesión. Defina ADMIN_INICIAL_CORREO y reinicie la API.');
+}
 if (!acceso.smtp) console.warn('SMTP_HOST sin configurar: los códigos de acceso se escriben en esta consola (solo desarrollo)');
 const app = construirApp({
   pool,

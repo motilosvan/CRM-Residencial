@@ -57,12 +57,15 @@ export interface AccesoConfig {
   /** `null` si falta SMTP_HOST: solo válido en desarrollo (el código se escribe en la consola de la API). */
   smtp: ConfigSmtp | null;
   adminInicialCorreo: string | null;
+  /** Conjunto que la API asegura al arrancar (CONJUNTO_INICIAL_SLUG y _NOMBRE); `null` usa el de la migración 0007. */
+  conjuntoInicial: { slug: string; nombre: string } | null;
   cookieSegura: boolean;
   origenes: Set<string>;
   desarrollo: boolean;
 }
 
 const ORIGENES_POR_DEFECTO = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const SLUG_VALIDO = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CORREO_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Una variable vacía cuenta como no definida. Devuelve el valor sin espacios, o undefined. */
@@ -113,6 +116,19 @@ export function accesoConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Acces
     adminInicialCorreo = admin.toLowerCase();
   }
 
+  let conjuntoInicial: { slug: string; nombre: string } | null = null;
+  const slug = opcional(env, 'CONJUNTO_INICIAL_SLUG');
+  const nombre = opcional(env, 'CONJUNTO_INICIAL_NOMBRE');
+  if (slug || nombre) {
+    if (!slug) throw new Error('Falta la variable de entorno CONJUNTO_INICIAL_SLUG (obligatoria con CONJUNTO_INICIAL_NOMBRE)');
+    if (!nombre) throw new Error('Falta la variable de entorno CONJUNTO_INICIAL_NOMBRE (obligatoria con CONJUNTO_INICIAL_SLUG)');
+    if (slug.length > 80 || !SLUG_VALIDO.test(slug)) {
+      throw new Error('CONJUNTO_INICIAL_SLUG inválido (minúsculas, números y guiones simples, hasta 80 caracteres)');
+    }
+    if (nombre.length > 120) throw new Error('CONJUNTO_INICIAL_NOMBRE inválido (hasta 120 caracteres)');
+    conjuntoInicial = { slug, nombre };
+  }
+
   const crudos = opcional(env, 'WEB_ORIGENES')?.split(',').map((o) => o.trim()).filter(Boolean) ?? ORIGENES_POR_DEFECTO;
   const origenes = new Set<string>();
   for (const o of crudos) {
@@ -121,7 +137,7 @@ export function accesoConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Acces
     origenes.add(normal);
   }
 
-  return { secreto, smtp, adminInicialCorreo, cookieSegura: env.COOKIE_SEGURA === 'true', origenes, desarrollo };
+  return { secreto, smtp, adminInicialCorreo, conjuntoInicial, cookieSegura: env.COOKIE_SEGURA === 'true', origenes, desarrollo };
 }
 
 const HOST_VALIDO = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
