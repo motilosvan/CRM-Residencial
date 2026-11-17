@@ -1,11 +1,10 @@
 import { useEffect, type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/sonner';
+import { crearQueryClient } from '@/lib/queryClient';
 import { useSesion } from '@/store/sesion';
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 5 * 60_000 } },
-});
+const queryClient = crearQueryClient();
 
 export function Proveedores({ children }: { children: ReactNode }) {
   // La sesión real está en una cookie httpOnly: se pregunta al servidor una vez al arrancar.

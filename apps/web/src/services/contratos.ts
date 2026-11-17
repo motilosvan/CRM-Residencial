@@ -51,3 +51,43 @@ export class ErrorAuth extends Error {
     this.desbloqueoEn = detalle?.desbloqueoEn;
   }
 }
+
+export type TipoErrorApi =
+  | 'NO_AUTENTICADO'
+  | 'PROHIBIDO'
+  | 'NO_ENCONTRADO'
+  | 'CONFLICTO'
+  | 'INVALIDO'
+  | 'LIMITE'
+  | 'RED'
+  | 'SERVIDOR';
+
+const MENSAJE_GENERICO = 'No pudimos completar la operación. Inténtalo de nuevo.';
+
+/** Estado HTTP → tipo. 0 (sin respuesta) y los 4xx no previstos son 'RED'; 400 se trata como 'INVALIDO'. */
+export function tipoDeEstado(estado: number): TipoErrorApi {
+  if (estado === 401) return 'NO_AUTENTICADO';
+  if (estado === 403) return 'PROHIBIDO';
+  if (estado === 404) return 'NO_ENCONTRADO';
+  if (estado === 409) return 'CONFLICTO';
+  if (estado === 400 || estado === 422) return 'INVALIDO';
+  if (estado === 429) return 'LIMITE';
+  if (estado >= 500) return 'SERVIDOR';
+  return 'RED';
+}
+
+/** Error de las llamadas de datos (`pedirApi*`). `estado` 0 = no hubo respuesta válida (red o forma inesperada). */
+export class ErrorApi extends Error {
+  readonly estado: number;
+  readonly mensaje: string;
+  readonly tipo: TipoErrorApi;
+
+  constructor(estado: number, mensaje?: string) {
+    const texto = mensaje && mensaje.trim() ? mensaje : MENSAJE_GENERICO;
+    super(texto);
+    this.name = 'ErrorApi';
+    this.estado = estado;
+    this.mensaje = texto;
+    this.tipo = tipoDeEstado(estado);
+  }
+}

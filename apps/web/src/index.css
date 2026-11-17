@@ -38,6 +38,11 @@
   --sidebar-ring: oklch(0.55 0.103 256.04);
   --primary-hover: oklch(0.2862 0.0736 256.04);
   --primary-claro: oklch(0.95 0.0184 256.04);
+  --destructive-claro: oklch(0.95 0.02 27);
+  --aviso: oklch(0.47 0.1 70.94);
+  --aviso-claro: oklch(0.95 0.025 70.94);
+  --exito: oklch(0.45 0.11 152);
+  --exito-claro: oklch(0.95 0.022 152);
 }
 
 @theme inline {
@@ -66,6 +71,11 @@
   --color-acento: var(--acento);
   --color-acento-foreground: var(--acento-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-claro: var(--destructive-claro);
+  --color-aviso: var(--aviso);
+  --color-aviso-claro: var(--aviso-claro);
+  --color-exito: var(--exito);
+  --color-exito-claro: var(--exito-claro);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
