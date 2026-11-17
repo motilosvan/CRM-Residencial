@@ -2,10 +2,11 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:cr
 import sql from 'mssql';
 import { z } from 'zod';
 import { sqlErrorNumber, withTx, type Tx } from '../db/withTx.js';
-import { ConflictError, Forbidden, NotFound, ValidationError } from '../errors.js';
+import { ConflictError, NotFound, ValidationError } from '../errors.js';
 import { registrarAuditoria } from './auditoria.js';
+import { exigirRol } from './autorizacion.js';
 import { estadoGateway } from './consultas.js';
-import { validar, type Actor, type Rol } from './solicitudes.js';
+import { validar, type Actor } from './solicitudes.js';
 
 /**
  * Buzón IMAP de cada conjunto (BUZONES_CONJUNTO, 0008). La contraseña de aplicación se guarda cifrada
@@ -129,22 +130,6 @@ const LARGO_MAX_CUENTA = 255;
 const PUERTO_IMAPS = 993;
 
 /* ---------- Autorización ---------- */
-
-/** Rol vigente del actor en su conjunto, leído de la BD dentro de la transacción (manda USUARIO_CONJUNTOS.rol). */
-async function exigirRol(tx: Tx, actor: Actor, roles: readonly Rol[], accion: string): Promise<void> {
-  const r = await tx
-    .request()
-    .input('u', sql.Int, actor.idUsuario)
-    .input('c', sql.Int, actor.idConjunto)
-    .query<{ rol: Rol }>(
-      `SELECT m.rol
-         FROM USUARIO_CONJUNTOS m
-         JOIN USUARIOS u ON u.idUsuario = m.idUsuario
-        WHERE m.idUsuario = @u AND m.idConjunto = @c AND m.activo = 1 AND u.activo = 1`,
-    );
-  const fila = r.recordset[0];
-  if (!fila || !roles.includes(fila.rol)) throw new Forbidden(`No tienes permiso para ${accion}`);
-}
 
 const ActorSchema = z.object({
   idUsuario: z.number().int().positive(),

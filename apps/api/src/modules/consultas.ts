@@ -448,17 +448,25 @@ export interface UsuarioConjunto {
   nombre: string;
   correo: string;
   rol: Rol;
+  /** Estado de la MEMBRESÍA en el conjunto (no el del usuario en general). */
+  activo: boolean;
+  /** Versión de la membresía: el panel la devuelve como `versionEsperada` al editarla. */
+  version: number;
 }
 
 const FiltroUsuariosSchema = z.object({
   rol: z.enum(['ADMIN', 'SOPORTE']).optional(),
+  incluirInactivos: z.boolean().optional(),
 });
 
-/** Personal activo con membresía activa en el conjunto (manda `USUARIO_CONJUNTOS.rol`). */
+/**
+ * Personal con membresía en el conjunto (manda `USUARIO_CONJUNTOS.rol`). Por defecto solo activos (usuario
+ * y membresía); con `incluirInactivos` también las membresías inactivas, para administrarlas.
+ */
 export async function listarUsuariosConjunto(
   pool: sql.ConnectionPool,
   idConjunto: number,
-  filtro: { rol?: Rol } = {},
+  filtro: { rol?: Rol; incluirInactivos?: boolean } = {},
 ): Promise<UsuarioConjunto[]> {
   const conj = validar(IdConjuntoSchema, idConjunto);
   const f = validar(FiltroUsuariosSchema, filtro);
@@ -469,11 +477,12 @@ export async function listarUsuariosConjunto(
         .request()
         .input('idConjunto', sql.Int, conj)
         .input('rol', sql.VarChar(30), f.rol ?? null)
+        .input('todos', sql.Bit, f.incluirInactivos ?? false)
         .query<UsuarioConjunto>(
-          `SELECT u.idUsuario AS id, u.nombre, u.correo, m.rol
+          `SELECT u.idUsuario AS id, u.nombre, u.correo, m.rol, m.activo, m.version
              FROM USUARIO_CONJUNTOS m
              JOIN USUARIOS u ON u.idUsuario = m.idUsuario
-            WHERE m.idConjunto = @idConjunto AND m.activo = 1 AND u.activo = 1
+            WHERE m.idConjunto = @idConjunto AND (@todos = 1 OR (m.activo = 1 AND u.activo = 1))
               AND (@rol IS NULL OR m.rol = @rol)
             ORDER BY u.nombre, u.idUsuario`,
         );

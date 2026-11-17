@@ -20,12 +20,13 @@ import {
 import { cambiarConjuntoActivo, crearSesion, leerSesion, revocarSesion, type SesionActiva, type SesionPublica } from '../modules/sesiones.js';
 import { cambiarEstado, reclasificar, type Actor } from '../modules/solicitudes.js';
 import { aceptarSugerencia } from '../modules/sugerencias.js';
+import { actualizarMembresiaUsuario, guardarUsuarioConjunto } from '../modules/usuarios.js';
 
 /**
  * API HTTP. Las rutas protegidas exigen sesión (cookie `mailflow_sesion`, httpOnly) y operan sobre
  * el conjunto activo de la sesión; públicas: `/api/salud`, `GET /api/conjuntos`, `/api/auth/codigo` y
  * `/api/auth/verificar`. Escucha solo en 127.0.0.1 y el panel la consume por el proxy de Vite (sin CORS).
- * Los POST y PUT rechazan un `Origin` ajeno.
+ * Los POST, PUT y PATCH rechazan un `Origin` ajeno.
  */
 
 declare module 'fastify' {
@@ -134,7 +135,7 @@ export function construirApp({ pool, hostsPermitidos, acceso, buzon, limitePetic
     reply.headers(CABECERAS);
     // DNS rebinding: un dominio ajeno que resuelva a 127.0.0.1 llega con otro Host.
     if (!hostsPermitidos.has(req.headers.host ?? '')) return reply.code(421).send({ error: 'Host no permitido' });
-    // CSRF: SameSite=Lax no cubre todo. Un POST con Origin ajeno se rechaza (sin Origin, p. ej. curl, pasa).
+    // CSRF: SameSite=Lax no cubre todo. Una escritura (todo salvo GET) con Origin ajeno se rechaza (sin Origin, p. ej. curl, pasa).
     const origen = req.headers.origin;
     if (req.method !== 'GET' && origen !== undefined && !origenesPermitidos.has(origen)) {
       return reply.code(403).send({ error: 'Origen no permitido' });
@@ -282,7 +283,24 @@ export function construirApp({ pool, hostsPermitidos, acceso, buzon, limitePetic
   app.get('/api/usuarios', protegida, async (req) => {
     if (req.sesion.usuario.rol !== 'ADMIN') throw new Forbidden('Solo un administrador puede listar el personal');
     const q = req.query as Record<string, unknown>;
-    return listarUsuariosConjunto(pool, req.sesion.idConjuntoActivo, { rol: texto(q.rol) as never });
+    return listarUsuariosConjunto(pool, req.sesion.idConjuntoActivo, { rol: texto(q.rol) as never,
+      incluirInactivos: q.incluirInactivos === 'true',
+    });
+  });
+
+  app.post('/api/usuarios', protegida, async (req, reply) => {
+    const usuario = await guardarUsuarioConjunto(pool, actorDe(req.sesion), (req.body ?? {}) as never);
+    return reply.code(201).send(usuario);
+  });
+
+  app.patch('/api/usuarios/:id', protegida, async (req) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    return actualizarMembresiaUsuario(
+      pool,
+      actorDe(req.sesion),
+      Number((req.params as { id: string }).id),
+      { rol: b.rol as never, activo: b.activo as never, versionEsperada: versionDe(b) as number },
+    );
   });
 
   app.get('/api/resumen', protegida, async (req) => resumen(pool, req.sesion.idConjuntoActivo));
