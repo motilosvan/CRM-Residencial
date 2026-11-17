@@ -18,6 +18,9 @@ vi.mock('@/services', () => ({
     salir: () => salirSrv(),
     sesion: () => Promise.resolve(null),
   },
+  resumenService: { obtener: () => Promise.resolve({ porEstado: [], carga: [], respuesta: [] }) },
+  buzonService: { estado: () => Promise.resolve({ cuentas: [], totalCorreos: 0, ultimoCorreo: null, conectado: false, buzon: null }) },
+  usuariosService: { listar: () => Promise.resolve([]), agregar: vi.fn(), actualizar: vi.fn() },
 }));
 const aplicarTema = vi.fn();
 vi.mock('@/tema/aplicarTema', () => ({ aplicarTema: (...a: unknown[]) => aplicarTema(...a) }));

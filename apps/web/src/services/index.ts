@@ -1,8 +1,14 @@
-import type { AuthService, ConjuntosService } from './contratos';
+import type { AuthService, BuzonService, ConjuntosService, ResumenService, UsuariosService } from './contratos';
 import { crearAuthHttp } from './http/authHttp';
+import { crearBuzonHttp } from './http/buzonHttp';
 import { crearConjuntosHttp } from './http/conjuntosHttp';
+import { crearResumenHttp } from './http/resumenHttp';
+import { crearUsuariosHttp } from './http/usuariosHttp';
 import { crearAuthMock } from './mock/authMock';
+import { crearBuzonMock } from './mock/buzonMock';
 import { crearConjuntosMock } from './mock/conjuntosMock';
+import { crearResumenMock } from './mock/resumenMock';
+import { crearUsuariosMock } from './mock/usuariosMock';
 import type { OpcionesMock } from './mock/tipos';
 
 const latenciaEnv = import.meta.env.VITE_MOCK_LATENCIA;
@@ -24,3 +30,6 @@ export const usaMock = import.meta.env.MODE === 'test' || import.meta.env.VITE_U
 
 export const conjuntosService: ConjuntosService = usaMock ? crearConjuntosMock(opciones) : crearConjuntosHttp();
 export const authService: AuthService = usaMock ? crearAuthMock(opciones) : crearAuthHttp();
+export const resumenService: ResumenService = usaMock ? crearResumenMock(opciones) : crearResumenHttp();
+export const buzonService: BuzonService = usaMock ? crearBuzonMock(opciones) : crearBuzonHttp();
+export const usuariosService: UsuariosService = usaMock ? crearUsuariosMock(opciones) : crearUsuariosHttp();

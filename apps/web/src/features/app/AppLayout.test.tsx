@@ -10,6 +10,9 @@ const salir = vi.fn();
 vi.mock('@/services', () => ({
   conjuntosService: { listar: (s?: AbortSignal) => listar(s) },
   authService: { salir: () => salir(), sesion: () => Promise.resolve(null) },
+  resumenService: { obtener: () => Promise.resolve({ porEstado: [], carga: [], respuesta: [] }) },
+  buzonService: { estado: () => Promise.resolve({ cuentas: [], totalCorreos: 0, ultimoCorreo: null, conectado: false, buzon: null }) },
+  usuariosService: { listar: () => Promise.resolve([]), agregar: vi.fn(), actualizar: vi.fn() },
 }));
 
 const seguir = vi.fn();
@@ -236,6 +239,19 @@ describe('AppLayout', () => {
     montar('/app/uno/residentes');
     expect(await screen.findByRole('heading', { name: 'Residentes' })).toBeInTheDocument();
     expect(screen.getByText(/próximamente/i)).toBeInTheDocument();
+  });
+
+  it('con rol SOPORTE la ruta usuarios muestra 403 y con ADMIN muestra UsuariosPage', async () => {
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/usuarios');
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/usuarios');
+    expect(await screen.findByRole('heading', { name: /personal del conjunto/i })).toBeInTheDocument();
   });
 });
 

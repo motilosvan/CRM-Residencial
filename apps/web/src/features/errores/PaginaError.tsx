@@ -11,13 +11,25 @@ interface Props {
   icono: LucideIcon;
   titulo: string;
   descripcion: string;
+  /** Cuando se muestra dentro del panel (`AppLayout`), evita anidar otro landmark `main` y otro `h1`. */
+  enPanel?: boolean;
 }
 
-export function PaginaError({ codigo, icono: Icono, titulo, descripcion }: Props) {
+export function PaginaError({ codigo, icono: Icono, titulo, descripcion, enPanel = false }: Props) {
   const slug = useSesion((s) => s.sesion?.conjuntoActivo.slug);
   const destino = slug ? `/app/${slug}/inicio` : '/';
+  const Contenedor = enPanel ? 'section' : 'main';
+  const Titulo = enPanel ? 'h2' : 'h1';
+
   return (
-    <main className="relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-primary p-6 text-primary-foreground">
+    <Contenedor
+      aria-label={enPanel ? titulo : undefined}
+      className={
+        enPanel
+          ? 'relative isolate flex min-h-96 items-center justify-center overflow-hidden rounded-2xl bg-primary p-6 text-primary-foreground sm:p-10'
+          : 'relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-primary p-6 text-primary-foreground'
+      }
+    >
       <div aria-hidden="true" className="mf-reticula absolute inset-0 -z-10" />
       <Revelar className="mx-auto flex w-full max-w-md flex-col items-center text-center">
         <p aria-hidden="true" className="font-heading text-[clamp(6rem,28vw,10rem)] font-extrabold leading-none tracking-[-0.05em] text-acento">
@@ -26,7 +38,7 @@ export function PaginaError({ codigo, icono: Icono, titulo, descripcion }: Props
         <span className="mt-6 grid size-11 place-items-center rounded-full border border-primary-foreground/25">
           <Icono aria-hidden="true" className="size-5" />
         </span>
-        <h1 className="mt-5 font-heading text-2xl font-bold tracking-tight sm:text-3xl">{titulo}</h1>
+        <Titulo className="mt-5 font-heading text-2xl font-bold tracking-tight sm:text-3xl">{titulo}</Titulo>
         <p className="mt-3 max-w-sm text-pretty leading-relaxed text-primary-foreground/85">{descripcion}</p>
         <Button
           asChild
@@ -37,6 +49,6 @@ export function PaginaError({ codigo, icono: Icono, titulo, descripcion }: Props
           <Link to={destino}>{slug ? 'Volver al inicio del panel' : 'Volver al inicio'}</Link>
         </Button>
       </Revelar>
-    </main>
+    </Contenedor>
   );
 }

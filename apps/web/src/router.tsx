@@ -1,7 +1,9 @@
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router';
 import GuardaConjunto from '@/features/app/GuardaConjunto';
+import GuardaRol from '@/features/app/GuardaRol';
 import InicioPage from '@/features/app/InicioPage';
 import ProximamentePage from '@/features/app/ProximamentePage';
+import UsuariosPage from '@/features/app/UsuariosPage';
 import LoginPage from '@/features/auth/LoginPage';
 import Pagina403 from '@/features/errores/Pagina403';
 import Pagina404 from '@/features/errores/Pagina404';
@@ -12,7 +14,6 @@ const SECCIONES_PROXIMAS = [
   'solicitudes',
   'validacion',
   'residentes',
-  'usuarios',
   'catalogos',
   'identidad',
   'reportes',
@@ -29,6 +30,14 @@ export const rutas: RouteObject[] = [
     children: [
       { index: true, element: <Navigate replace to="inicio" /> },
       { path: 'inicio', element: <InicioPage /> },
+      {
+        path: 'usuarios',
+        element: (
+          <GuardaRol roles={['ADMIN']}>
+            <UsuariosPage />
+          </GuardaRol>
+        ),
+      },
       ...SECCIONES_PROXIMAS.map((ruta) => ({ path: ruta, element: <ProximamentePage /> })),
     ],
   },

@@ -1,5 +1,5 @@
 import type { OpcionesMock } from './tipos';
-import { ErrorAuth } from '../contratos';
+import { ErrorApi, ErrorAuth } from '../contratos';
 
 export function esperar(o: OpcionesMock, signal?: AbortSignal): Promise<void> {
   const [min, max] = o.latenciaMs ?? [300, 900];
@@ -23,4 +23,10 @@ export function esperar(o: OpcionesMock, signal?: AbortSignal): Promise<void> {
 
 export function fallaRed(o: OpcionesMock): void {
   if ((o.tasaError ?? 0) > 0 && Math.random() < (o.tasaError ?? 0)) throw new ErrorAuth('RED');
+}
+
+export function fallaRedApi(o: OpcionesMock): void {
+  if ((o.tasaError ?? 0) > 0 && Math.random() < (o.tasaError ?? 0)) {
+    throw new ErrorApi(0, 'No pudimos conectar con el servidor.');
+  }
 }

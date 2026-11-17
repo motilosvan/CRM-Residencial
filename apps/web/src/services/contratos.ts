@@ -1,4 +1,4 @@
-import type { Conjunto, Sesion } from '@/types/conjunto';
+import type { Conjunto, Rol, Sesion } from '@/types/conjunto';
 
 export interface ConjuntosService {
   /** GET /conjuntos */
@@ -90,4 +90,113 @@ export class ErrorApi extends Error {
     this.mensaje = texto;
     this.tipo = tipoDeEstado(estado);
   }
+}
+
+/* ---------- Resumen del conjunto ---------- */
+
+export interface ResumenEstado {
+  estado: string;
+  n: number;
+}
+
+export interface CargaUsuarioResumen {
+  idUsuario: number;
+  nombre: string;
+  abiertas: number;
+}
+
+export interface RespuestaCategoriaResumen {
+  categoria: string;
+  total: number;
+  minutosPromedio: number;
+  dentroSla: number;
+}
+
+export interface ResumenConjunto {
+  porEstado: ResumenEstado[];
+  carga: CargaUsuarioResumen[];
+  respuesta: RespuestaCategoriaResumen[];
+}
+
+export interface ResumenService {
+  /** GET /resumen */
+  obtener(signal?: AbortSignal): Promise<ResumenConjunto>;
+}
+
+/* ---------- Buzón y estado del gateway ---------- */
+
+export type CodigoErrorBuzon = 'AUTENTICACION' | 'CERTIFICADO' | 'CONEXION' | 'CLAVE' | 'INTERNO';
+
+export interface CuentaGateway {
+  cuenta: string;
+  ultimoUid: number;
+  actualizadoEn: string;
+}
+
+export interface BuzonPublico {
+  correo: string;
+  imapHost: string;
+  imapPort: number;
+  buzon: string;
+  diasIniciales: number;
+  marcarLeido: boolean;
+  activo: boolean;
+  ultimaSincronizacion: string | null;
+  ultimoError: CodigoErrorBuzon | (string & {}) | null;
+  version: number;
+}
+
+export interface EstadoGateway {
+  cuentas: CuentaGateway[];
+  totalCorreos: number;
+  ultimoCorreo: string | null;
+  conectado: boolean;
+  buzon: BuzonPublico | null;
+}
+
+/** Contrato del buzón del conjunto (guardar, desconectar y sincronizar se incorporan en 5c). */
+export interface BuzonService {
+  /** GET /gateway/estado */
+  estado(signal?: AbortSignal): Promise<EstadoGateway>;
+}
+
+/* ---------- Personal del conjunto (usuarios) ---------- */
+
+export interface UsuarioConjunto {
+  id: number;
+  nombre: string;
+  correo: string;
+  rol: Rol;
+  /** Estado de la membresía en el conjunto activo. */
+  activo: boolean;
+  /** Versión de la membresía para control optimista (`versionEsperada` en PATCH). */
+  version: number;
+  /** Estado global de la cuenta en la plataforma. */
+  cuentaActiva: boolean;
+}
+
+export interface FiltroUsuarios {
+  rol?: Rol;
+  incluirInactivos?: boolean;
+}
+
+export interface NuevoUsuarioConjunto {
+  nombre: string;
+  correo: string;
+  rol: Rol;
+}
+
+export interface CambioUsuarioConjunto {
+  rol?: Rol;
+  activo?: boolean;
+  versionEsperada: number;
+}
+
+export interface UsuariosService {
+  /** GET /usuarios */
+  listar(filtro?: FiltroUsuarios, signal?: AbortSignal): Promise<UsuarioConjunto[]>;
+  /** POST /usuarios */
+  agregar(entrada: NuevoUsuarioConjunto): Promise<UsuarioConjunto>;
+  /** PATCH /usuarios/:id */
+  actualizar(id: number, cambio: CambioUsuarioConjunto): Promise<UsuarioConjunto>;
 }
