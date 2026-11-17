@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { authService } from '@/services';
 import { ErrorAuth, type CodigoErrorAuth } from '@/services/contratos';
-import type { Sesion } from '@/types/conjunto';
+import type { Conjunto, Sesion } from '@/types/conjunto';
 
 export const LIMITE_INACTIVIDAD_MS = 30 * 60_000;
 export const AVISO_MS = 60_000;
@@ -44,6 +44,7 @@ interface SesionState {
   /** Limpia el store al instante y avisa al servidor sin bloquear ni mostrar errores. */
   salir(m: MotivoCierre): void;
   cambiarConjunto(slug: string): Promise<boolean>;
+  actualizarConjunto(conjunto: Conjunto): void;
   registrarActividad(ahora?: number): void;
   /** Reconcilia con lo que escribió otra pestaña en localStorage. */
   sincronizar(): void;
@@ -174,6 +175,20 @@ export const useSesion = create<SesionState>()(
         const { sesion } = get();
         if (!sesion) return;
         set({ sesion: { ...sesion, ultimaActividad: ahora }, ultimaActividad: ahora });
+      },
+      actualizarConjunto: (conjunto) => {
+        const { sesion } = get();
+        if (!sesion) return;
+        const limpio: Conjunto = {
+          id: conjunto.id,
+          slug: conjunto.slug,
+          nombre: conjunto.nombre,
+          ...(conjunto.logoUrl ? { logoUrl: conjunto.logoUrl } : {}),
+          ...(conjunto.paleta ? { paleta: { ...conjunto.paleta } } : {}),
+        };
+        const conjuntoActivo = sesion.conjuntoActivo.id === limpio.id ? limpio : sesion.conjuntoActivo;
+        const conjuntos = sesion.conjuntos.map((c) => (c.id === limpio.id ? limpio : c));
+        set({ sesion: { ...sesion, conjuntoActivo, conjuntos } });
       },
       sincronizar: () => {
         const p = leerPersistido();

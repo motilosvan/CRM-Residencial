@@ -1,7 +1,9 @@
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router';
 import BandejaPage from '@/features/app/BandejaPage';
+import CatalogosPage from '@/features/app/CatalogosPage';
 import GuardaConjunto from '@/features/app/GuardaConjunto';
 import GuardaRol from '@/features/app/GuardaRol';
+import IdentidadPage from '@/features/app/IdentidadPage';
 import InicioPage from '@/features/app/InicioPage';
 import ProximamentePage from '@/features/app/ProximamentePage';
 import ResidentesPage from '@/features/app/ResidentesPage';
@@ -14,8 +16,6 @@ import Pagina404 from '@/features/errores/Pagina404';
 import LandingPage from '@/features/landing/LandingPage';
 
 const SECCIONES_PROXIMAS = [
-  'catalogos',
-  'identidad',
   'reportes',
   'auditoria',
   'laboratorio-ia',
@@ -53,6 +53,22 @@ export const rutas: RouteObject[] = [
         element: (
           <GuardaRol roles={['ADMIN']}>
             <UsuariosPage />
+          </GuardaRol>
+        ),
+      },
+      {
+        path: 'catalogos',
+        element: (
+          <GuardaRol roles={['ADMIN']}>
+            <CatalogosPage />
+          </GuardaRol>
+        ),
+      },
+      {
+        path: 'identidad',
+        element: (
+          <GuardaRol roles={['ADMIN']}>
+            <IdentidadPage />
           </GuardaRol>
         ),
       },

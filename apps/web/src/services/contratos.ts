@@ -483,3 +483,63 @@ export interface ValidacionService {
   /** GET /validacion */
   obtener(signal?: AbortSignal): Promise<ColaValidacion>;
 }
+
+/* ---------- Identidad del conjunto y catálogos del dominio (Ola 2) ---------- */
+
+export interface ConjuntoIdentidad extends Conjunto {
+  version: number;
+}
+
+export interface EntradaIdentidadConjunto {
+  nombre?: string;
+  logoUrl?: string | null;
+  colorPrimario?: string | null;
+  colorAcento?: string | null;
+  colorSecundario?: string | null;
+  versionEsperada: number;
+}
+
+export interface IdentidadService {
+  /** GET /conjunto/identidad */
+  obtener(signal?: AbortSignal): Promise<ConjuntoIdentidad>;
+  /** PATCH /conjunto/identidad */
+  actualizar(entrada: EntradaIdentidadConjunto): Promise<ConjuntoIdentidad>;
+}
+
+export interface CatalogoCategoria {
+  id: number;
+  nombre: CategoriaSolicitud;
+  prioridadBase: PrioridadSolicitud;
+  palabrasClave: string[];
+}
+
+export interface CatalogoPrioridad {
+  id: number;
+  nombre: PrioridadSolicitud;
+  peso: number;
+  slaHoras: number;
+}
+
+export interface CatalogoEstado {
+  id: number;
+  nombre: EstadoSolicitud;
+  esFinal: boolean;
+}
+
+export interface CatalogoTransicion {
+  origen: EstadoSolicitud;
+  destino: EstadoSolicitud;
+}
+
+export interface CatalogosDominio {
+  categorias: CatalogoCategoria[];
+  prioridades: CatalogoPrioridad[];
+  palabrasClaveUrgencia: string[];
+  estados: CatalogoEstado[];
+  transiciones: CatalogoTransicion[];
+}
+
+export interface CatalogosService {
+  /** GET /catalogos */
+  obtener(signal?: AbortSignal): Promise<CatalogosDominio>;
+}

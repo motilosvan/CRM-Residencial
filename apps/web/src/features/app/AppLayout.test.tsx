@@ -29,6 +29,20 @@ vi.mock('@/services', () => ({
   usuariosService: { listar: () => Promise.resolve([]), agregar: vi.fn(), actualizar: vi.fn() },
   residentesService: { listar: () => Promise.resolve([]), crear: vi.fn(), actualizar: vi.fn(), vincularCorreo: vi.fn() },
   validacionService: { obtener: () => Promise.resolve({ sugerencias: [], remitentesSinResidente: [] }) },
+  identidadService: {
+    obtener: () => Promise.resolve({ id: 'a', slug: 'uno', nombre: 'Torres de Uno', version: 1 }),
+    actualizar: vi.fn(),
+  },
+  catalogosService: {
+    obtener: () =>
+      Promise.resolve({
+        categorias: [],
+        prioridades: [],
+        palabrasClaveUrgencia: [],
+        estados: [],
+        transiciones: [],
+      }),
+  },
 }));
 
 const seguir = vi.fn();
@@ -252,9 +266,34 @@ describe('AppLayout', () => {
 
   it('las secciones próximas muestran el estado vacío con su título', async () => {
     useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
-    montar('/app/uno/catalogos');
-    expect(await screen.findByRole('heading', { name: 'Catálogos' })).toBeInTheDocument();
+    montar('/app/uno/reportes');
+    expect(await screen.findByRole('heading', { name: 'Reportes' })).toBeInTheDocument();
     expect(screen.getByText(/próximamente/i)).toBeInTheDocument();
+  });
+
+  it('con rol SOPORTE identidad y catalogos muestran 403 y con ADMIN cargan sus páginas', async () => {
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/identidad');
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/identidad');
+    expect(await screen.findByRole('heading', { name: /identidad del conjunto/i })).toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/catalogos');
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/catalogos');
+    expect(await screen.findByRole('heading', { name: /catálogos del dominio/i })).toBeInTheDocument();
   });
 
   it('con rol SOPORTE validacion y residentes muestran 403 y con ADMIN cargan sus páginas', async () => {

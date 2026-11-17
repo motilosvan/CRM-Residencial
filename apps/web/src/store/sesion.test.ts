@@ -340,4 +340,50 @@ describe('useSesion', () => {
       expect(useSesion.getState().estado).toBe('lista');
     });
   });
+
+  describe('actualizarConjunto', () => {
+    it('actualiza conjuntoActivo y la entrada en conjuntos sin incrementar generacion ni cerrar sesión', () => {
+      const base = crearSesion();
+      useSesion.getState().iniciar(base);
+      const genAntes = useSesion.getState().generacion;
+      const actAntes = useSesion.getState().sesion?.ultimaActividad;
+
+      const actualizado = {
+        id: 'c1',
+        slug: 'alamos',
+        nombre: 'Álamos Renovado',
+        logoUrl: '/logos/alamos.png',
+        paleta: { primario: '#1E3A5F', acento: '#E0A458' },
+      };
+      useSesion.getState().actualizarConjunto(actualizado);
+
+      const estado = useSesion.getState();
+      expect(estado.generacion).toBe(genAntes);
+      expect(estado.estado).toBe('lista');
+      expect(estado.motivoCierre).toBeNull();
+      expect(estado.sesion?.ultimaActividad).toBe(actAntes);
+      expect(estado.sesion?.conjuntoActivo).toEqual(actualizado);
+      expect(estado.sesion?.conjuntos[0]).toEqual(actualizado);
+      expect(estado.sesion?.conjuntos[1]).toEqual(base.conjuntos[1]);
+
+      // Limpiar logoUrl y paleta también los borra en conjuntoActivo y conjuntos
+      const limpio = { id: 'c1', slug: 'alamos', nombre: 'Álamos Sin Paleta' };
+      useSesion.getState().actualizarConjunto(limpio);
+      expect(useSesion.getState().sesion?.conjuntoActivo).toEqual(limpio);
+      expect(useSesion.getState().sesion?.conjuntos[0]).toEqual(limpio);
+    });
+
+    it('si el conjunto actualizado no es el activo solo actualiza su entrada en conjuntos; sin sesión es no-op', () => {
+      useSesion.getState().actualizarConjunto({ id: 'c1', slug: 'alamos', nombre: 'Nada' });
+      expect(useSesion.getState().sesion).toBeNull();
+
+      const base = crearSesion();
+      useSesion.getState().iniciar(base);
+      const otroActualizado = { id: 'c2', slug: 'robles', nombre: 'Robles Nuevo' };
+      useSesion.getState().actualizarConjunto(otroActualizado);
+
+      expect(useSesion.getState().sesion?.conjuntoActivo).toEqual(base.conjuntoActivo);
+      expect(useSesion.getState().sesion?.conjuntos[1]).toEqual(otroActualizado);
+    });
+  });
 });

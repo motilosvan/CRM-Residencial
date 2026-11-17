@@ -1,12 +1,17 @@
 import { ErrorAuth, type AuthService, type CodigoEnviado, type SolicitudCodigo } from '../contratos';
-import type { Sesion } from '@/types/conjunto';
+import type { Conjunto, Sesion } from '@/types/conjunto';
 import { CODIGO_DEMO, CONJUNTOS_DEMO, USUARIOS_DEMO } from './datos';
+import type { EstadoPanelMock } from './estadoCompartido';
 import { setSesionMock } from './sesionMockEstado';
 import type { OpcionesMock } from './tipos';
 import { esperar, fallaRed } from './util';
 
 export { CODIGO_DEMO } from './datos';
 export type { OpcionesMock } from './tipos';
+
+export interface OpcionesAuthMock extends OpcionesMock {
+  estado?: EstadoPanelMock;
+}
 
 const VIGENCIA_MS = 10 * 60_000;
 const REENVIO_MS = 60_000;
@@ -25,15 +30,33 @@ interface Estado {
 const clave = (conjuntoId: string, correo: string) => `${conjuntoId}|${correo}`;
 const normalizar = (correo: string) => correo.trim().toLowerCase();
 
+function aConjuntoPublico(c: Conjunto): Conjunto {
+  const pub: Conjunto = { id: c.id, slug: c.slug, nombre: c.nombre };
+  if (c.logoUrl) pub.logoUrl = c.logoUrl;
+  if (c.paleta) pub.paleta = { ...c.paleta };
+  return pub;
+}
+
 /**
  * El estado se lleva por (conjunto, correo) exista o no el usuario: así un correo desconocido
  * se comporta igual que uno registrado y no se revela quién pertenece al conjunto.
  */
-export function crearAuthMock(o: OpcionesMock = {}): AuthService {
+export function crearAuthMock(o: OpcionesAuthMock = {}): AuthService {
   const ahora = o.ahora ?? Date.now;
   const estados = new Map<string, Estado>();
   let sesionActual: Sesion | null = null;
   const copia = (s: Sesion): Sesion => structuredClone(s);
+  const conjuntosFuente = (): readonly Conjunto[] => (o.estado ? o.estado.conjuntos : CONJUNTOS_DEMO);
+
+  const sincronizarConjuntosDeSesion = (s: Sesion): Sesion => {
+    const fuente = conjuntosFuente();
+    const mapa = new Map(fuente.map((c) => [c.id, aConjuntoPublico(c)]));
+    return {
+      ...s,
+      conjuntoActivo: mapa.get(s.conjuntoActivo.id) ?? aConjuntoPublico(s.conjuntoActivo),
+      conjuntos: s.conjuntos.map((c) => mapa.get(c.id) ?? aConjuntoPublico(c)),
+    };
+  };
 
   const estadoDe = (p: SolicitudCodigo): Estado => {
     const k = clave(p.conjuntoId, normalizar(p.correo));
@@ -79,7 +102,8 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
 
       const correo = normalizar(p.correo);
       const usuario = USUARIOS_DEMO.find((u) => u.correo === correo && u.conjuntoIds.includes(p.conjuntoId));
-      const activo = CONJUNTOS_DEMO.find((c) => c.id === p.conjuntoId);
+      const fuente = conjuntosFuente();
+      const activo = fuente.find((c) => c.id === p.conjuntoId);
 
       if (e.activo && usuario && activo && codigo === CODIGO_DEMO) {
         e.activo = false;
@@ -87,8 +111,8 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
         const { conjuntoIds, ...datos } = usuario;
         sesionActual = {
           usuario: datos,
-          conjuntoActivo: { ...activo },
-          conjuntos: CONJUNTOS_DEMO.filter((c) => conjuntoIds.includes(c.id)).map((c) => ({ ...c })),
+          conjuntoActivo: aConjuntoPublico(activo),
+          conjuntos: fuente.filter((c) => conjuntoIds.includes(c.id)).map(aConjuntoPublico),
           ultimaActividad: ahora(),
         };
         setSesionMock(sesionActual);
@@ -107,7 +131,12 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
     async sesion(): Promise<Sesion | null> {
       await esperar(o);
       fallaRed(o);
-      return sesionActual ? copia(sesionActual) : null;
+      if (!sesionActual) return null;
+      if (o.estado) {
+        sesionActual = sincronizarConjuntosDeSesion(sesionActual);
+        setSesionMock(sesionActual);
+      }
+      return copia(sesionActual);
     },
 
     async cambiarConjunto(conjuntoId): Promise<Sesion> {
@@ -115,9 +144,12 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
       fallaRed(o);
       // Sin sesión el servidor responde 401, que el cliente trata como 'RED'.
       if (!sesionActual) throw new ErrorAuth('RED');
+      if (o.estado) {
+        sesionActual = sincronizarConjuntosDeSesion(sesionActual);
+      }
       const nuevo = sesionActual.conjuntos.find((c) => c.id === conjuntoId);
       if (!nuevo) throw new ErrorAuth('SIN_MEMBRESIA');
-      sesionActual = { ...sesionActual, conjuntoActivo: { ...nuevo }, ultimaActividad: ahora() };
+      sesionActual = { ...sesionActual, conjuntoActivo: aConjuntoPublico(nuevo), ultimaActividad: ahora() };
       setSesionMock(sesionActual);
       return copia(sesionActual);
     },

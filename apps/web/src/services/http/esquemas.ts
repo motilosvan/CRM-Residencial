@@ -241,3 +241,40 @@ export const esquemaColaValidacion = z.object({
   sugerencias: z.array(esquemaSugerenciaPendienteValidacion),
   remitentesSinResidente: z.array(esquemaFilaCorreoBuzon),
 });
+
+export const esquemaConjuntoIdentidad = esquemaConjunto.extend({
+  version: z.number().int().positive(),
+});
+
+export const esquemaCatalogoCategoria = z.object({
+  id: z.number().int().positive(),
+  nombre: esquemaCategoriaSolicitud,
+  prioridadBase: esquemaPrioridadSolicitud,
+  palabrasClave: z.array(z.string()),
+});
+
+export const esquemaCatalogoPrioridad = z.object({
+  id: z.number().int().positive(),
+  nombre: esquemaPrioridadSolicitud,
+  peso: z.number().int().positive(),
+  slaHoras: z.number().int().positive(),
+});
+
+export const esquemaCatalogoEstado = z.object({
+  id: z.number().int().positive(),
+  nombre: esquemaEstadoSolicitud,
+  esFinal: z.boolean(),
+});
+
+export const esquemaCatalogoTransicion = z.object({
+  origen: esquemaEstadoSolicitud,
+  destino: esquemaEstadoSolicitud,
+});
+
+export const esquemaCatalogosDominio = z.object({
+  categorias: z.array(esquemaCatalogoCategoria),
+  prioridades: z.array(esquemaCatalogoPrioridad),
+  palabrasClaveUrgencia: z.array(z.string()),
+  estados: z.array(esquemaCatalogoEstado),
+  transiciones: z.array(esquemaCatalogoTransicion),
+});

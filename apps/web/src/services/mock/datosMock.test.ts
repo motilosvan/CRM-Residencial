@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { ErrorApi } from '../contratos';
 import { CODIGO_DEMO, crearAuthMock } from './authMock';
 import { crearBuzonMock } from './buzonMock';
+import { crearCatalogosMock } from './catalogosMock';
+import { crearConjuntosMock } from './conjuntosMock';
 import { crearCorreosMock } from './correosMock';
-import { CORREOS_DEMO, RESIDENTES_DEMO, SOLICITUDES_DEMO } from './datos';
+import { CATALOGOS_DEMO, CORREOS_DEMO, RESIDENTES_DEMO, SOLICITUDES_DEMO } from './datos';
 import { crearEstadoPanelMock } from './estadoCompartido';
+import { crearIdentidadMock } from './identidadMock';
 import { crearResidentesMock } from './residentesMock';
 import { crearResumenMock } from './resumenMock';
 import { getSesionMock, setSesionMock } from './sesionMockEstado';
@@ -679,5 +682,181 @@ describe('residentesMock y validacionMock', () => {
     await expect(
       residentesSrv.crear({ nombre: 'Otro', unidad: 'T1-101', correo: segundoHuerfano.remitente }),
     ).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+  });
+});
+
+describe('identidadMock y catalogosMock', () => {
+  it('identidadMock: obtener devuelve copia con version; actualizar incrementa version, normaliza y maneja no-op, 409 y 422', async () => {
+    const estado = crearEstadoPanelMock();
+    const srv = crearIdentidadMock({ ...SIN_LATENCIA, estado, conjuntoId: 'cj-parques' });
+
+    const inicial = await srv.obtener();
+    expect(inicial).toMatchObject({
+      id: 'cj-parques',
+      slug: 'parque-central-occidente',
+      nombre: 'Parque Central de Occidente',
+      version: 1,
+    });
+    inicial.nombre = 'Mutado';
+    expect((await srv.obtener()).nombre).toBe('Parque Central de Occidente');
+
+    // No-op no sube versión
+    const sinCambios = await srv.actualizar({ nombre: 'Parque Central de Occidente', versionEsperada: 1 });
+    expect(sinCambios.version).toBe(1);
+
+    // Actualiza nombre, logo relativo y paleta en minúsculas -> normaliza a MAYÚSCULAS y sube versión
+    const actualizado = await srv.actualizar({
+      nombre: '  Parque Central Sur  ',
+      logoUrl: ' /logos/parque.svg ',
+      colorPrimario: '#1e3a5f',
+      colorAcento: '#e0a458',
+      colorSecundario: '#2b4c7e',
+      versionEsperada: 1,
+    });
+    expect(actualizado).toEqual({
+      id: 'cj-parques',
+      slug: 'parque-central-occidente',
+      nombre: 'Parque Central Sur',
+      logoUrl: '/logos/parque.svg',
+      paleta: { primario: '#1E3A5F', acento: '#E0A458', secundario: '#2B4C7E' },
+      version: 2,
+    });
+
+    // Versión desactualizada -> 409
+    await expect(srv.actualizar({ nombre: 'Vieja', versionEsperada: 1 })).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+    });
+
+    // Paleta incompleta -> 422
+    await expect(srv.actualizar({ colorPrimario: null, versionEsperada: 2 })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+    await expect(srv.actualizar({ colorAcento: null, versionEsperada: 2 })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+
+    // Logo inválido -> 422
+    for (const mala of ['javascript:alert(1)', 'data:image/png;base64,xx', '//evil.test/a.png', '/\\evil', 'logo.png']) {
+      await expect(srv.actualizar({ logoUrl: mala, versionEsperada: 2 })).rejects.toMatchObject({
+        estado: 422,
+        tipo: 'INVALIDO',
+      });
+    }
+
+    // Color inválido -> 422
+    await expect(
+      srv.actualizar({ colorPrimario: '#123', colorAcento: '#E0A458', versionEsperada: 2 }),
+    ).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+
+    // Restablecer paleta (primario y acento null) limpia también secundario y quita logoUrl con ''
+    const restablecido = await srv.actualizar({
+      logoUrl: '   ',
+      colorPrimario: null,
+      colorAcento: null,
+      colorSecundario: '#112233',
+      versionEsperada: 2,
+    });
+    expect(restablecido.logoUrl).toBeUndefined();
+    expect(restablecido.paleta).toBeUndefined();
+    expect(restablecido.version).toBe(3);
+
+    // Poner solo un color desde null -> 422
+    await expect(srv.actualizar({ colorPrimario: '#1E3A5F', versionEsperada: 3 })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+  });
+
+  it('identidadMock comparte estado con conjuntosMock y authMock al actualizar y recargar sesión', async () => {
+    setSesionMock(null);
+    const estado = crearEstadoPanelMock();
+    const conjuntosSrv = crearConjuntosMock({ ...SIN_LATENCIA, estado });
+    const authSrv = crearAuthMock({ ...SIN_LATENCIA, estado, ahora: () => Date.now() });
+    const identidadSrv = crearIdentidadMock({ ...SIN_LATENCIA, estado });
+
+    try {
+      await authSrv.solicitarCodigo({ conjuntoId: 'cj-parques', correo: 'admin@demo.mailflow.test' });
+      await authSrv.verificarCodigo({
+        conjuntoId: 'cj-parques',
+        correo: 'admin@demo.mailflow.test',
+        codigo: CODIGO_DEMO,
+      });
+
+      const upd = await identidadSrv.actualizar({
+        nombre: 'Parque Renovado',
+        logoUrl: 'https://cdn.demo.mailflow.test/parque.png',
+        colorPrimario: '#1E3A5F',
+        colorAcento: '#E0A458',
+        colorSecundario: null,
+        versionEsperada: 1,
+      });
+      expect(upd.nombre).toBe('Parque Renovado');
+
+      const lista = await conjuntosSrv.listar();
+      expect(lista.find((c) => c.id === 'cj-parques')).toEqual({
+        id: 'cj-parques',
+        slug: 'parque-central-occidente',
+        nombre: 'Parque Renovado',
+        logoUrl: 'https://cdn.demo.mailflow.test/parque.png',
+        paleta: { primario: '#1E3A5F', acento: '#E0A458' },
+      });
+
+      const recargada = await authSrv.sesion();
+      expect(recargada?.conjuntoActivo).toMatchObject({
+        id: 'cj-parques',
+        nombre: 'Parque Renovado',
+        logoUrl: 'https://cdn.demo.mailflow.test/parque.png',
+        paleta: { primario: '#1E3A5F', acento: '#E0A458' },
+      });
+
+      await authSrv.cambiarConjunto('cj-nogal');
+      const devuelta = await authSrv.cambiarConjunto('cj-parques');
+      expect(devuelta.conjuntoActivo.nombre).toBe('Parque Renovado');
+    } finally {
+      setSesionMock(null);
+    }
+  });
+
+  it('catalogosMock devuelve las 5 categorías, 3 prioridades con SLA, urgencias, 5 estados y 6 transiciones', async () => {
+    const srv = crearCatalogosMock(SIN_LATENCIA);
+    const cat = await srv.obtener();
+
+    expect(cat.categorias.map((c) => c.nombre)).toEqual([
+      'SEGURIDAD',
+      'MANTENIMIENTO',
+      'FACTURACION',
+      'ADMINISTRATIVO',
+      'SIN_CLASIFICAR',
+    ]);
+    expect(cat.categorias.find((c) => c.nombre === 'SEGURIDAD')).toMatchObject({
+      prioridadBase: 'ALTA',
+    });
+    expect(cat.categorias.find((c) => c.nombre === 'SEGURIDAD')!.palabrasClave.length).toBeGreaterThan(10);
+    expect(cat.categorias.find((c) => c.nombre === 'SIN_CLASIFICAR')!.palabrasClave).toEqual([]);
+
+    expect(cat.prioridades).toEqual([
+      { id: 1, nombre: 'ALTA', peso: 3, slaHoras: 4 },
+      { id: 2, nombre: 'MEDIA', peso: 2, slaHoras: 24 },
+      { id: 3, nombre: 'BAJA', peso: 1, slaHoras: 72 },
+    ]);
+    expect(cat.palabrasClaveUrgencia.length).toBeGreaterThan(10);
+    expect(cat.estados.map((e) => e.nombre)).toEqual(['NUEVA', 'ASIGNADA', 'EN_PROCESO', 'RESUELTA', 'CERRADA']);
+    expect(cat.estados.filter((e) => e.esFinal).map((e) => e.nombre)).toEqual(['CERRADA']);
+    expect(cat.transiciones).toEqual(CATALOGOS_DEMO.transiciones);
+    expect(cat.transiciones).toHaveLength(6);
+
+    cat.categorias[0].nombre = 'OTRA' as never;
+    expect((await srv.obtener()).categorias[0].nombre).toBe('SEGURIDAD');
+
+    const roto = crearCatalogosMock({ ...SIN_LATENCIA, tasaError: 1 });
+    await expect(roto.obtener()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+
+    const ctl = new AbortController();
+    const promesa = crearCatalogosMock({ latenciaMs: [50, 50] }).obtener(ctl.signal);
+    ctl.abort();
+    await expect(promesa).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

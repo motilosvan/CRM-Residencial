@@ -1,8 +1,10 @@
 import type {
   AuthService,
   BuzonService,
+  CatalogosService,
   ConjuntosService,
   CorreosService,
+  IdentidadService,
   ResidentesService,
   ResumenService,
   SolicitudesService,
@@ -11,8 +13,10 @@ import type {
 } from './contratos';
 import { crearAuthHttp } from './http/authHttp';
 import { crearBuzonHttp } from './http/buzonHttp';
+import { crearCatalogosHttp } from './http/catalogosHttp';
 import { crearConjuntosHttp } from './http/conjuntosHttp';
 import { crearCorreosHttp } from './http/correosHttp';
+import { crearIdentidadHttp } from './http/identidadHttp';
 import { crearResidentesHttp } from './http/residentesHttp';
 import { crearResumenHttp } from './http/resumenHttp';
 import { crearSolicitudesHttp } from './http/solicitudesHttp';
@@ -20,9 +24,11 @@ import { crearUsuariosHttp } from './http/usuariosHttp';
 import { crearValidacionHttp } from './http/validacionHttp';
 import { crearAuthMock } from './mock/authMock';
 import { crearBuzonMock } from './mock/buzonMock';
+import { crearCatalogosMock } from './mock/catalogosMock';
 import { crearConjuntosMock } from './mock/conjuntosMock';
 import { crearCorreosMock } from './mock/correosMock';
 import { crearEstadoPanelMock } from './mock/estadoCompartido';
+import { crearIdentidadMock } from './mock/identidadMock';
 import { crearResidentesMock } from './mock/residentesMock';
 import { crearResumenMock } from './mock/resumenMock';
 import { actorDesdeSesionMock, crearSolicitudesMock } from './mock/solicitudesMock';
@@ -49,8 +55,12 @@ export const usaMock = import.meta.env.MODE === 'test' || import.meta.env.VITE_U
 
 const estadoPanelMock = usaMock ? crearEstadoPanelMock() : undefined;
 
-export const conjuntosService: ConjuntosService = usaMock ? crearConjuntosMock(opciones) : crearConjuntosHttp();
-export const authService: AuthService = usaMock ? crearAuthMock(opciones) : crearAuthHttp();
+export const conjuntosService: ConjuntosService = usaMock
+  ? crearConjuntosMock({ ...opciones, estado: estadoPanelMock })
+  : crearConjuntosHttp();
+export const authService: AuthService = usaMock
+  ? crearAuthMock({ ...opciones, estado: estadoPanelMock })
+  : crearAuthHttp();
 export const resumenService: ResumenService = usaMock ? crearResumenMock(opciones) : crearResumenHttp();
 export const buzonService: BuzonService = usaMock ? crearBuzonMock(opciones) : crearBuzonHttp();
 export const correosService: CorreosService = usaMock
@@ -66,3 +76,7 @@ export const residentesService: ResidentesService = usaMock
 export const validacionService: ValidacionService = usaMock
   ? crearValidacionMock({ ...opciones, estado: estadoPanelMock })
   : crearValidacionHttp();
+export const identidadService: IdentidadService = usaMock
+  ? crearIdentidadMock({ ...opciones, estado: estadoPanelMock })
+  : crearIdentidadHttp();
+export const catalogosService: CatalogosService = usaMock ? crearCatalogosMock(opciones) : crearCatalogosHttp();

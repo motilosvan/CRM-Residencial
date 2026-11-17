@@ -37,6 +37,20 @@ vi.mock('@/services', () => ({
   usuariosService: { listar: () => Promise.resolve([]), agregar: vi.fn(), actualizar: vi.fn() },
   residentesService: { listar: () => Promise.resolve([]), crear: vi.fn(), actualizar: vi.fn(), vincularCorreo: vi.fn() },
   validacionService: { obtener: () => Promise.resolve({ sugerencias: [], remitentesSinResidente: [] }) },
+  identidadService: {
+    obtener: () => Promise.resolve({ id: 'a', slug: 'propio', nombre: 'Propio Uno', version: 1 }),
+    actualizar: vi.fn(),
+  },
+  catalogosService: {
+    obtener: () =>
+      Promise.resolve({
+        categorias: [],
+        prioridades: [],
+        palabrasClaveUrgencia: [],
+        estados: [],
+        transiciones: [],
+      }),
+  },
 }));
 const aplicarTema = vi.fn();
 vi.mock('@/tema/aplicarTema', () => ({ aplicarTema: (...a: unknown[]) => aplicarTema(...a) }));

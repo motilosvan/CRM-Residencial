@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ErrorApi } from '../contratos';
 import { respuesta, simularFetch } from './ayudas.test-util';
 import { crearBuzonHttp } from './buzonHttp';
+import { crearCatalogosHttp } from './catalogosHttp';
 import { crearCorreosHttp } from './correosHttp';
+import { crearIdentidadHttp } from './identidadHttp';
 import { crearResidentesHttp } from './residentesHttp';
 import { crearResumenHttp } from './resumenHttp';
 import { crearSolicitudesHttp } from './solicitudesHttp';
@@ -723,5 +725,119 @@ describe('validacionHttp', () => {
 
     simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede consultar la cola de validación' }));
     await expect(crearValidacionHttp().obtener()).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+  });
+});
+
+describe('identidadHttp', () => {
+  const identidadBase = {
+    id: '1',
+    slug: 'parque-central-occidente',
+    nombre: 'Parque Central de Occidente',
+    logoUrl: 'https://cdn.demo.mailflow.test/logo.png',
+    paleta: { primario: '#355E3B', acento: '#D6A64F', secundario: '#789653' },
+    version: 1,
+  };
+
+  it('obtener: GET /api/conjunto/identidad pasa signal y valida ConjuntoIdentidad (con y sin opcionales)', async () => {
+    const ctl = new AbortController();
+    const f1 = simularFetch(async () => respuesta(200, identidadBase));
+    expect(await crearIdentidadHttp().obtener(ctl.signal)).toEqual(identidadBase);
+    expect(f1).toHaveBeenCalledWith(
+      '/api/conjunto/identidad',
+      expect.objectContaining({ credentials: 'same-origin', signal: ctl.signal }),
+    );
+
+    const minima = { id: '2', slug: 'altos-del-nogal', nombre: 'Altos del Nogal', version: 3 };
+    simularFetch(async () => respuesta(200, minima));
+    expect(await crearIdentidadHttp().obtener()).toEqual(minima);
+
+    // Falta version o tiene hex inválido → ErrorApi tipo RED
+    simularFetch(async () => respuesta(200, { id: '2', slug: 'x', nombre: 'X' }));
+    await expect(crearIdentidadHttp().obtener()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+
+    simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede acceder a este recurso' }));
+    await expect(crearIdentidadHttp().obtener()).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+  });
+
+  it('actualizar: PATCH /api/conjunto/identidad envía entrada con versionEsperada y maneja 409 / 422 / 403', async () => {
+    const entrada = {
+      nombre: 'Parque Central Renovado',
+      logoUrl: null,
+      colorPrimario: '#1E3A5F',
+      colorAcento: '#E0A458',
+      colorSecundario: null,
+      versionEsperada: 1,
+    };
+    const actualizada = {
+      id: '1',
+      slug: 'parque-central-occidente',
+      nombre: 'Parque Central Renovado',
+      paleta: { primario: '#1E3A5F', acento: '#E0A458' },
+      version: 2,
+    };
+    const f = simularFetch(async () => respuesta(200, actualizada));
+    expect(await crearIdentidadHttp().actualizar(entrada)).toEqual(actualizada);
+    expect(f.mock.calls[0][0]).toBe('/api/conjunto/identidad');
+    expect(f.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(cuerpoDe(f)).toEqual(entrada);
+
+    simularFetch(async () =>
+      respuesta(409, { error: 'La identidad del conjunto cambió (versión 2, se esperaba 1). Recárguela.' }),
+    );
+    await expect(crearIdentidadHttp().actualizar(entrada)).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+    });
+
+    simularFetch(async () =>
+      respuesta(422, { error: 'La paleta requiere colorPrimario y colorAcento juntos (o ambos en null)' }),
+    );
+    await expect(crearIdentidadHttp().actualizar({ colorPrimario: '#1E3A5F', versionEsperada: 2 })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+      mensaje: 'La paleta requiere colorPrimario y colorAcento juntos (o ambos en null)',
+    });
+
+    simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede acceder a este recurso' }));
+    await expect(crearIdentidadHttp().actualizar(entrada)).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+  });
+});
+
+describe('catalogosHttp', () => {
+  const catalogosValidos = {
+    categorias: [
+      { id: 1, nombre: 'SEGURIDAD' as const, prioridadBase: 'ALTA' as const, palabrasClave: ['robo', 'alarma'] },
+      { id: 5, nombre: 'SIN_CLASIFICAR' as const, prioridadBase: 'MEDIA' as const, palabrasClave: [] },
+    ],
+    prioridades: [
+      { id: 1, nombre: 'ALTA' as const, peso: 3, slaHoras: 4 },
+      { id: 2, nombre: 'MEDIA' as const, peso: 2, slaHoras: 24 },
+      { id: 3, nombre: 'BAJA' as const, peso: 1, slaHoras: 72 },
+    ],
+    palabrasClaveUrgencia: ['urgente', 'emergencia'],
+    estados: [
+      { id: 1, nombre: 'NUEVA' as const, esFinal: false },
+      { id: 5, nombre: 'CERRADA' as const, esFinal: true },
+    ],
+    transiciones: [
+      { origen: 'NUEVA' as const, destino: 'ASIGNADA' as const },
+      { origen: 'RESUELTA' as const, destino: 'CERRADA' as const },
+    ],
+  };
+
+  it('obtener: GET /api/catalogos pasa signal y valida forma; 403 y forma inválida → ErrorApi', async () => {
+    const ctl = new AbortController();
+    const f = simularFetch(async () => respuesta(200, catalogosValidos));
+    expect(await crearCatalogosHttp().obtener(ctl.signal)).toEqual(catalogosValidos);
+    expect(f).toHaveBeenCalledWith(
+      '/api/catalogos',
+      expect.objectContaining({ credentials: 'same-origin', signal: ctl.signal }),
+    );
+
+    simularFetch(async () => respuesta(200, { categorias: 'mal' }));
+    await expect(crearCatalogosHttp().obtener()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+
+    simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede acceder a este recurso' }));
+    await expect(crearCatalogosHttp().obtener()).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
   });
 });
