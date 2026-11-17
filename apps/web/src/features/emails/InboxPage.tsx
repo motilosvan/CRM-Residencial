@@ -1,8 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Inbox, RefreshCw, Search, Sparkles } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Inbox, RefreshCw, Search, ShieldAlert, Sparkles } from 'lucide-react';
 import { CategoryBadge, PriorityBadge } from '../../components/ui/Badges';
 import { categoriaPanel, etiquetaCategoria, etiquetaEstado, fechaHora, haceCuanto, prioridadPanel } from '../../lib/etiquetas';
-import { api, ErrorApi, type CorreoBuzon, type DetalleCorreo, type EstadoGateway, type SugerenciaIA } from '../../services/api';
+import {
+  api,
+  ErrorApi,
+  type CorreoBuzon,
+  type DetalleCorreo,
+  type EstadoGateway,
+  type NivelRiesgo,
+  type SenalRiesgo,
+  type SugerenciaIA,
+} from '../../services/api';
 
 const POR_PAGINA = 50;
 const REFRESCO_MS = 30_000;
@@ -17,6 +26,7 @@ export function InboxPage() {
   const [gateway, setGateway] = useState<EstadoGateway | null>(null);
   const [busqueda, setBusqueda] = useState('');
   const [q, setQ] = useState('');
+  const [soloSospechosos, setSoloSospechosos] = useState(false);
   const [desde, setDesde] = useState(0);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<ErrorApi | null>(null);
@@ -31,7 +41,7 @@ export function InboxPage() {
     setCargando(true);
     try {
       const [p, g] = await Promise.all([
-        api.correos({ q: q || undefined, limite: POR_PAGINA, desplazamiento: desde }, ctrl.signal),
+        api.correos({ q: q || undefined, limite: POR_PAGINA, desplazamiento: desde, sospechosos: soloSospechosos }, ctrl.signal),
         api.estadoGateway(ctrl.signal),
       ]);
       setPagina(p);
@@ -43,7 +53,7 @@ export function InboxPage() {
     } finally {
       if (peticion.current === ctrl) setCargando(false);
     }
-  }, [q, desde]);
+  }, [q, desde, soloSospechosos]);
 
   useEffect(() => {
     void cargar();
@@ -120,15 +130,30 @@ export function InboxPage() {
         </div>
       )}
 
-      <div className="relative max-w-md">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#5C645C]" />
-        <input
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          placeholder="Buscar por asunto, remitente o residente"
-          maxLength={200}
-          className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#D5DDD0] dark:border-slate-700 bg-[#F7F6F0] dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-[#789653]"
-        />
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="relative max-w-md flex-1 min-w-[240px]">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#5C645C]" />
+          <input
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar por asunto, remitente o residente"
+            maxLength={200}
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#D5DDD0] dark:border-slate-700 bg-[#F7F6F0] dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-[#789653]"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-[#292D29] dark:text-[#F7F6F0] cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={soloSospechosos}
+            onChange={(e) => {
+              setSoloSospechosos(e.target.checked);
+              setDesde(0);
+            }}
+            className="accent-red-700"
+          />
+          <ShieldAlert className="w-4 h-4 text-red-700" />
+          Solo sospechosos
+        </label>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -136,7 +161,13 @@ export function InboxPage() {
           {pagina && pagina.correos.length === 0 ? (
             <div className="p-10 text-center text-sm text-[#5C645C] space-y-2">
               <Inbox className="w-8 h-8 mx-auto opacity-60" />
-              <p>{q ? 'Ningún correo coincide con la búsqueda.' : 'Aún no hay correos en el buzón.'}</p>
+              <p>
+                {soloSospechosos && !q
+                  ? 'No hay correos sospechosos.'
+                  : q || soloSospechosos
+                    ? 'Ningún correo coincide con la búsqueda.'
+                    : 'Aún no hay correos en el buzón.'}
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto max-h-[580px]">
@@ -167,6 +198,7 @@ export function InboxPage() {
                         )}
                       </td>
                       <td className="p-3.5 align-top">
+                        <MarcaRiesgo riesgo={c.riesgo} />
                         <p className="font-medium line-clamp-1">{c.asunto || '(sin asunto)'}</p>
                         <p className="text-xs text-[#5C645C] line-clamp-1">{c.extracto}</p>
                         <span className="text-xs text-[#5C645C]">{fechaHora(c.fechaRecepcion)}</span>
@@ -259,6 +291,60 @@ function BloqueSugerencia({ sugerencia }: { sugerencia: SugerenciaIA }) {
   );
 }
 
+const ESTILO_RIESGO: Record<Exclude<NivelRiesgo, 'BAJO'>, { marca: string; caja: string; texto: string }> = {
+  ALTO: {
+    marca: 'bg-red-100 text-red-800 border-red-300',
+    caja: 'bg-red-50 border-red-300 text-red-900 dark:bg-red-950/40 dark:text-red-100',
+    texto: 'Posible correo malicioso',
+  },
+  MEDIO: {
+    marca: 'bg-amber-100 text-amber-900 border-amber-300',
+    caja: 'bg-amber-50 border-amber-300 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100',
+    texto: 'Correo sospechoso',
+  },
+};
+
+/** Marca en la lista. Un correo de riesgo BAJO no lleva marca: así la marca conserva su valor de alerta. */
+function MarcaRiesgo({ riesgo }: { riesgo: NivelRiesgo | null }) {
+  if (!riesgo || riesgo === 'BAJO') return null;
+  const e = ESTILO_RIESGO[riesgo];
+  return (
+    <span className={`inline-flex items-center gap-1 mb-1 px-2 py-0.5 rounded border text-[11px] font-bold ${e.marca}`}>
+      <ShieldAlert className="w-3 h-3" />
+      {riesgo === 'ALTO' ? 'Riesgo alto' : 'Sospechoso'}
+    </span>
+  );
+}
+
+/**
+ * Por qué el correo parece malicioso y qué hacer. El cuerpo se muestra siempre como texto (sin enlaces
+ * activos ni HTML), así que verlo en el panel es seguro; el riesgo está en abrirlo en Gmail o seguir sus enlaces.
+ */
+function AvisoRiesgo({ riesgo, puntaje, senales }: { riesgo: Exclude<NivelRiesgo, 'BAJO'>; puntaje: number; senales: SenalRiesgo[] }) {
+  const e = ESTILO_RIESGO[riesgo];
+  return (
+    <div role="alert" className={`border p-3 rounded-xl text-xs space-y-2 ${e.caja}`}>
+      <div className="flex items-center gap-2 font-bold text-sm">
+        <ShieldAlert className="w-4 h-4 shrink-0" />
+        {e.texto} · riesgo {riesgo.toLowerCase()} ({puntaje}/100)
+      </div>
+      {senales.length > 0 && (
+        <ul className="list-disc pl-5 space-y-0.5">
+          {senales.map((s) => (
+            <li key={s.codigo} className="break-words">
+              {s.detalle}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p>
+        <strong>Qué hacer:</strong> no abra enlaces ni adjuntos, no responda con datos ni haga pagos. Si dice venir de
+        un banco o de la administración, confírmelo por un canal conocido (teléfono o en persona).
+      </p>
+    </div>
+  );
+}
+
 function PanelDetalle({ correo }: { correo: DetalleCorreo }) {
   const prioridad = prioridadPanel(correo.prioridad);
   return (
@@ -283,6 +369,9 @@ function PanelDetalle({ correo }: { correo: DetalleCorreo }) {
           {prioridad && <PriorityBadge prioridad={prioridad} />}
         </div>
       </div>
+      {correo.riesgo && correo.riesgo !== 'BAJO' && (
+        <AvisoRiesgo riesgo={correo.riesgo} puntaje={correo.puntajeRiesgo ?? 0} senales={correo.senalesRiesgo} />
+      )}
       {correo.sugerencia && <BloqueSugerencia sugerencia={correo.sugerencia} />}
       <div>
         <span className="text-xs font-bold uppercase text-[#5C645C] block mb-1">Cuerpo original recibido:</span>

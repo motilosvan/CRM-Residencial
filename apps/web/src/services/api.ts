@@ -19,7 +19,19 @@ export interface CorreoBuzon {
   prioridad: string | null;
   sugerenciaEstado: EstadoSugerencia | null;
   sugerenciaCategoria: string | null;
+  /** Análisis de seguridad hecho al recibir el correo (phishing, fraude, adjuntos peligrosos...). */
+  riesgo: NivelRiesgo | null;
+  puntajeRiesgo: number | null;
   extracto: string;
+}
+
+export type NivelRiesgo = 'BAJO' | 'MEDIO' | 'ALTO';
+
+/** Una razón del riesgo: qué se vio y cuánto pesó. El detalle solo trae dominios, nunca direcciones. */
+export interface SenalRiesgo {
+  codigo: string;
+  peso: number;
+  detalle: string;
 }
 
 export type EstadoSugerencia = 'EN_REINTENTO' | 'LISTA' | 'FALLIDA';
@@ -40,6 +52,7 @@ export interface DetalleCorreo extends Omit<CorreoBuzon, 'extracto'> {
   cuerpo: string;
   /** Lo enmascara el servidor: es el texto que recibe el modelo de IA. */
   cuerpoEnmascarado: string;
+  senalesRiesgo: SenalRiesgo[];
   sugerencia: SugerenciaIA | null;
 }
 
@@ -87,9 +100,10 @@ async function pedir<T>(ruta: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const api = {
-  correos(filtro: { q?: string; limite?: number; desplazamiento?: number } = {}, signal?: AbortSignal) {
+  correos(filtro: { q?: string; limite?: number; desplazamiento?: number; sospechosos?: boolean } = {}, signal?: AbortSignal) {
     const qs = new URLSearchParams();
     if (filtro.q) qs.set('q', filtro.q);
+    if (filtro.sospechosos) qs.set('sospechosos', '1');
     if (filtro.limite !== undefined) qs.set('limite', String(filtro.limite));
     if (filtro.desplazamiento !== undefined) qs.set('desplazamiento', String(filtro.desplazamiento));
     return pedir<PaginaCorreos>(`/api/correos?${qs}`, signal);
