@@ -52,7 +52,7 @@ describe('Gateway · sincronizar', () => {
     b.agregar(mensajeCrudo({ id: '<t1-b@x>' }), haceDias(1));
     const o = opciones();
 
-    expect(await sincronizar(db.pool, b.fuente(), o)).toEqual({ revisados: 2, nuevos: 2, duplicados: 0, respaldos: 0, pendientes: false });
+    expect(await sincronizar(db.pool, b.fuente(), o)).toEqual({ revisados: 2, nuevos: 2, duplicados: 0, respaldos: 0, sospechosos: 0, pendientes: false });
     expect(await correosCon('<t1-viejo')).toBe(0);
     expect(await leerCheckpoint(db.pool, o.cuenta)).toEqual({ uidValidity: 1, ultimoUid: 3 });
 
@@ -233,6 +233,31 @@ describe('Gateway · sincronizar', () => {
     b.cortes.clear();
     expect(await sincronizar(db.pool, b.fuente(), o, intentos)).toMatchObject({ nuevos: 1, respaldos: 0 });
     expect(await categoriaDe('<t10-a@x>')).toBe('SEGURIDAD');
+  });
+
+  it('un phishing se guarda igual, con su análisis de seguridad en ALTO, y el log no expone su contenido', async () => {
+    const b = new BuzonFalso();
+    b.agregar(mensajeCrudo({ id: '<t11-normal@x>', asunto: 'Gotera', cuerpo: 'Hay una gotera en el 502' }), haceDias(1));
+    const uid = b.agregar(
+      mensajeCrudo({
+        id: '<t11-phishing@x>',
+        cabeceras: ['Authentication-Results: mx.google.com; spf=fail smtp.mailfrom=evil.ru; dmarc=fail'],
+        de: '"Bancolombia" <alertas@bancolombia-seguridad.com>',
+        asunto: 'Su cuenta será bloqueada',
+        html: '<p>Verifique su clave <a href="https://bit.ly/bco">www.bancolombia.com</a></p>',
+      }),
+      haceDias(1),
+    );
+    const mensajes: string[] = [];
+    expect(await sincronizar(db.pool, b.fuente(), opciones({ log: (m) => mensajes.push(m) }))).toMatchObject({ nuevos: 2, sospechosos: 1 });
+
+    const filas = await db.q<{ messageId: string; nivel: string }>(
+      `SELECT c.messageId, a.nivel FROM CORREOS c JOIN ANALISIS_SEGURIDAD a ON a.idCorreo = c.idCorreo
+        WHERE c.messageId LIKE '<t11-%' ORDER BY c.messageId`,
+    );
+    expect(filas).toEqual([{ messageId: '<t11-normal@x>', nivel: 'BAJO' }, { messageId: '<t11-phishing@x>', nivel: 'ALTO' }]);
+    expect(mensajes).toEqual([expect.stringMatching(new RegExp(`^UID ${uid}: posible correo malicioso \\(riesgo ALTO`))]);
+    expect(mensajes.join(' ')).not.toMatch(/bloqueada|bancolombia/i);
   });
 
   it('un MIME que no se puede interpretar se guarda igual como respaldo SIN_CLASIFICAR (regla 8)', async () => {

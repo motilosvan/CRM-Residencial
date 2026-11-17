@@ -24,6 +24,8 @@ export interface ResultadoSincronizacion {
   duplicados: number;
   /** Guardados SIN_CLASIFICAR por MIME ilegible o por superar el máximo de intentos (incluye registros mínimos y no descargables). */
   respaldos: number;
+  /** Correos nuevos con riesgo MEDIO o ALTO según el análisis de seguridad (se guardaron igual). */
+  sospechosos: number;
   /** Quedaron correos para el siguiente ciclo (se alcanzó maxPorCiclo). */
   pendientes: boolean;
 }
@@ -114,7 +116,7 @@ export async function sincronizar(
   const ingestar = opts.ingestar ?? ingestarCorreo;
   const parsear = opts.parsear ?? aCorreoEntrante;
   const log = opts.log ?? (() => {});
-  const res: ResultadoSincronizacion = { revisados: 0, nuevos: 0, duplicados: 0, respaldos: 0, pendientes: false };
+  const res: ResultadoSincronizacion = { revisados: 0, nuevos: 0, duplicados: 0, respaldos: 0, sospechosos: 0, pendientes: false };
 
   // abrir() va dentro del try: si falla a mitad (ya autenticado, pero sin buzón) la sesión se cierra igual.
   try {
@@ -192,6 +194,11 @@ export async function sincronizar(
       if (r.duplicado) res.duplicados++;
       else if (respaldo) res.respaldos++;
       else res.nuevos++;
+      if (!r.duplicado && r.riesgo !== 'BAJO') {
+        res.sospechosos++;
+        // Solo UID y nivel: el asunto o el remitente podrían traer datos personales.
+        log(`UID ${uid}: posible correo malicioso (riesgo ${r.riesgo}, ${r.puntajeRiesgo}/100). Revíselo en el panel antes de abrir enlaces o adjuntos.`);
+      }
 
       // Después del COMMIT: si esto falla, el correo ya está guardado; marcarlo leído es cosmético.
       if (opts.marcarLeido) await fuente.marcarLeido(uid).catch((err) => log(`No se pudo marcar leído el UID ${uid}: ${describirError(err)}`));

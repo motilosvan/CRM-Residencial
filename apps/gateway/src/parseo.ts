@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { simpleParser } from 'mailparser';
 import type { CorreoEntrante } from '../../api/src/modules/ingesta.js';
+import { evidenciaDe, evidenciaDeCabeceras } from './evidencia.js';
 
 /** De dónde salió el mensaje: alimenta el checkpoint (T6) que se guarda junto con el correo. */
 export interface Contexto {
@@ -27,16 +28,47 @@ const checkpointDe = (ctx: Contexto) => ({ cuenta: ctx.cuenta, uidValidity: ctx.
 
 const fechaValida = (d: Date | undefined) => (d && !Number.isNaN(d.getTime()) ? d : undefined);
 
-/** Respaldo si mailparser no entregara texto plano: quita etiquetas y entidades básicas. */
-function htmlATexto(html: string): string {
-  return html
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
-    .replace(/<br\s*\/?>|<\/(p|div|li|tr|h\d)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+const LIMITE_HTML_A_TEXTO = 2_000_000;
+
+/**
+ * Respaldo si mailparser no entregara texto plano: quita etiquetas, script/style y entidades básicas.
+ *
+ * Recorrido lineal con indexOf. La versión anterior usaba `/<(script|style)[\s\S]*?<\/\1>/` y `/<[^>]+>/`,
+ * que retroceden de forma cuadrática: un HTML de 280 KB con "<style " repetido tardaba 12 s (ReDoS) y uno de
+ * pocos MB habría congelado el gateway. Cada búsqueda avanza el cursor, así cada carácter se recorre una vez.
+ */
+export function htmlATexto(html: string): string {
+  const h = html.slice(0, LIMITE_HTML_A_TEXTO);
+  const bajo = h.toLowerCase();
+  const partes: string[] = [];
+  let i = 0;
+  while (i < h.length) {
+    const abre = h.indexOf('<', i);
+    if (abre === -1) {
+      partes.push(h.slice(i));
+      break;
+    }
+    partes.push(h.slice(i, abre));
+    const cierra = h.indexOf('>', abre);
+    if (cierra === -1) break; // etiqueta sin cerrar hasta el final: lo que sigue no es texto visible
+    const nombre = bajo.slice(abre + 1, Math.min(cierra, abre + 12));
+    const bloque = /^(script|style)\b/.exec(nombre)?.[1];
+    if (bloque) {
+      // Su contenido no se ve: se salta hasta "</script>" o "</style>" (o hasta el final si no se cierra).
+      const fin = bajo.indexOf(`</${bloque}`, cierra);
+      const finEtiqueta = fin === -1 ? -1 : bajo.indexOf('>', fin);
+      i = finEtiqueta === -1 ? h.length : finEtiqueta + 1;
+      continue;
+    }
+    if (/^(br\b|br\/|\/(p|div|li|tr|h\d)\b)/.test(nombre)) partes.push('\n');
+    i = cierra + 1;
+  }
+  return partes
+    .join('')
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -57,6 +89,7 @@ export async function aCorreoEntrante(fuente: Buffer, ctx: Contexto): Promise<Co
     asunto: p.subject ?? '',
     cuerpo: texto,
     recibidoEn: fechaValida(ctx.fechaInterna) ?? fechaValida(p.date),
+    evidencia: evidenciaDe(p),
     checkpoint: checkpointDe(ctx),
   };
 }
@@ -81,6 +114,7 @@ export function correoDeRespaldo(fuente: Buffer, ctx: Contexto): CorreoEntrante 
     cuerpo: crudo.slice(0, LIMITE_CRUDO_RESPALDO),
     recibidoEn: fechaValida(ctx.fechaInterna),
     sinClasificar: true,
+    evidencia: evidenciaDeCabeceras(cabeceras),
     checkpoint: checkpointDe(ctx),
   };
 }

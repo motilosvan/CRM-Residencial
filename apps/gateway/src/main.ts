@@ -54,6 +54,7 @@ while (!detener) {
     }, intentos);
     if (r.revisados > 0 || unaVez) {
       log(`Revisados ${r.revisados}: ${r.nuevos} nuevos, ${r.duplicados} ya estaban, ${r.respaldos} sin clasificar` +
+        (r.sospechosos ? `, ${r.sospechosos} sospechosos` : '') +
         (r.pendientes ? ' (quedan más, sigue de inmediato)' : ''));
     }
     hayMas = r.pendientes;
