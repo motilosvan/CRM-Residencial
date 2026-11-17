@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ErrorApi } from '../contratos';
 import { crearBuzonMock } from './buzonMock';
+import { crearCorreosMock } from './correosMock';
+import { CORREOS_DEMO } from './datos';
 import { crearResumenMock } from './resumenMock';
 import { crearUsuariosMock } from './usuariosMock';
 
@@ -23,6 +25,152 @@ describe('resumenMock y buzonMock', () => {
 
     const ctl = new AbortController();
     const promesa = crearBuzonMock({ latenciaMs: [50, 50] }).estado(ctl.signal);
+    ctl.abort();
+    await expect(promesa).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('buzonMock · guardar, desconectar y sincronizar', () => {
+  const sinBuzon = {
+    cuentas: [],
+    totalCorreos: 0,
+    ultimoCorreo: null,
+    conectado: false,
+    buzon: null,
+  };
+
+  it('conecta, reconecta subiendo versión, rechaza contraseña inválida (422) y versión vieja (409)', async () => {
+    const srv = crearBuzonMock({ ...SIN_LATENCIA, estadoInicial: sinBuzon });
+
+    await expect(
+      srv.guardar({ correo: 'mesa@demo.mailflow.test', contrasena: 'invalida' }),
+    ).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+    expect((await srv.estado()).conectado).toBe(false);
+
+    const primero = await srv.guardar({
+      correo: '  MESA@DEMO.MAILFLOW.TEST ',
+      contrasena: 'abcd efgh ijkl mnop',
+      buzon: 'INBOX',
+      diasIniciales: 14,
+      marcarLeido: true,
+    });
+    expect(primero.conectado).toBe(true);
+    expect(primero.buzon).toMatchObject({
+      correo: 'mesa@demo.mailflow.test',
+      imapHost: 'imap.gmail.com',
+      imapPort: 993,
+      buzon: 'INBOX',
+      diasIniciales: 14,
+      marcarLeido: true,
+      activo: true,
+      version: 1,
+      ultimoError: null,
+    });
+
+    await expect(
+      srv.guardar({ correo: 'mesa@demo.mailflow.test', contrasena: 'abcd efgh ijkl mnop', versionEsperada: 9 }),
+    ).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+
+    const segundo = await srv.guardar({
+      correo: 'mesa@demo.mailflow.test',
+      contrasena: 'qwer tyui opas dfgh',
+      versionEsperada: 1,
+    });
+    expect(segundo.buzon?.version).toBe(2);
+  });
+
+  it('desconectar: 404 si nunca se conectó, 409 versión vieja, 200 al desconectar e idempotente', async () => {
+    const vacio = crearBuzonMock({ ...SIN_LATENCIA, estadoInicial: sinBuzon });
+    await expect(vacio.desconectar()).rejects.toMatchObject({ estado: 404, tipo: 'NO_ENCONTRADO' });
+
+    const srv = crearBuzonMock(SIN_LATENCIA);
+    await expect(srv.desconectar(99)).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+
+    const off = await srv.desconectar(1);
+    expect(off.conectado).toBe(false);
+    expect(off.buzon?.activo).toBe(false);
+    expect(off.buzon?.version).toBe(2);
+
+    const idem = await srv.desconectar(2);
+    expect(idem.buzon?.version).toBe(2);
+  });
+
+  it('sincronizar: 422 si desconectado, devuelve conteos y actualiza estado; 409 si concurren dos llamadas', async () => {
+    const desconectado = crearBuzonMock({ ...SIN_LATENCIA, estadoInicial: sinBuzon });
+    await expect(desconectado.sincronizar()).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+
+    const srv = crearBuzonMock(SIN_LATENCIA);
+    const r = await srv.sincronizar();
+    expect(r).toEqual(
+      expect.objectContaining({
+        revisados: expect.any(Number),
+        nuevos: expect.any(Number),
+        duplicados: expect.any(Number),
+        respaldos: expect.any(Number),
+        pendientes: expect.any(Boolean),
+      }),
+    );
+    const despues = await srv.estado();
+    expect(despues.buzon?.ultimoError).toBeNull();
+    expect(despues.buzon?.ultimaSincronizacion).toBeTruthy();
+
+    const lento = crearBuzonMock({ latenciaMs: [40, 40] });
+    const p1 = lento.sincronizar();
+    const p2 = lento.sincronizar();
+    await expect(p2).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+    await expect(p1).resolves.toMatchObject({ revisados: expect.any(Number) });
+  });
+});
+
+describe('correosMock', () => {
+  it('datos demo cumplen Ley 1581 (@demo.mailflow.test) e incluyen casos con y sin residente y sugerencia IA', () => {
+    expect(CORREOS_DEMO.length).toBeGreaterThanOrEqual(4);
+    for (const c of CORREOS_DEMO) {
+      expect(c.remitente).toMatch(/@demo\.mailflow\.test$/);
+    }
+    expect(CORREOS_DEMO.some((c) => c.idResidente === null && c.residente === null)).toBe(true);
+    expect(CORREOS_DEMO.some((c) => c.idResidente !== null && c.residente !== null)).toBe(true);
+    expect(CORREOS_DEMO.some((c) => c.sugerencia?.estado === 'LISTA')).toBe(true);
+    expect(CORREOS_DEMO.some((c) => c.sugerencia === null)).toBe(true);
+  });
+
+  it('listar ordena más recientes primero, filtra por q, pagina y recorta extracto a 200 caracteres', async () => {
+    const srv = crearCorreosMock(SIN_LATENCIA);
+    const todos = await srv.listar();
+    expect(todos.total).toBe(CORREOS_DEMO.length);
+    for (let i = 1; i < todos.correos.length; i++) {
+      const prev = new Date(todos.correos[i - 1].fechaRecepcion).getTime();
+      const curr = new Date(todos.correos[i].fechaRecepcion).getTime();
+      expect(prev).toBeGreaterThanOrEqual(curr);
+    }
+    for (const f of todos.correos) {
+      expect(f.extracto.length).toBeLessThanOrEqual(200);
+    }
+
+    const pagina2 = await srv.listar({ limite: 2, desplazamiento: 2 });
+    expect(pagina2.total).toBe(todos.total);
+    expect(pagina2.correos).toHaveLength(2);
+    expect(pagina2.correos[0].id).toBe(todos.correos[2].id);
+
+    const sinResidente = todos.correos.find((c) => c.idResidente === null)!;
+    const porRemitente = await srv.listar({ q: sinResidente.remitente });
+    expect(porRemitente.correos.some((c) => c.id === sinResidente.id)).toBe(true);
+  });
+
+  it('detalle devuelve cuerpo, cuerpoEnmascarado y sugerencia; 404 si no existe y respeta AbortSignal/tasaError', async () => {
+    const srv = crearCorreosMock(SIN_LATENCIA);
+    const { correos } = await srv.listar();
+    const d = await srv.detalle(correos[0].id);
+    expect(d.cuerpo.length).toBeGreaterThan(0);
+    expect(d.cuerpoEnmascarado.length).toBeGreaterThan(0);
+
+    await expect(srv.detalle(999_999)).rejects.toMatchObject({ estado: 404, tipo: 'NO_ENCONTRADO' });
+
+    const roto = crearCorreosMock({ ...SIN_LATENCIA, tasaError: 1 });
+    await expect(roto.listar()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+
+    const ctl = new AbortController();
+    const promesa = crearCorreosMock({ latenciaMs: [50, 50] }).detalle(correos[0].id, ctl.signal);
     ctl.abort();
     await expect(promesa).rejects.toMatchObject({ name: 'AbortError' });
   });

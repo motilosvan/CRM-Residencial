@@ -154,10 +154,96 @@ export interface EstadoGateway {
   buzon: BuzonPublico | null;
 }
 
-/** Contrato del buzón del conjunto (guardar, desconectar y sincronizar se incorporan en 5c). */
+export interface EntradaBuzon {
+  correo: string;
+  contrasena: string;
+  imapHost?: string;
+  imapPort?: number;
+  buzon?: string;
+  diasIniciales?: number;
+  marcarLeido?: boolean;
+  versionEsperada?: number;
+}
+
+export interface ResultadoSincronizacionBuzon {
+  revisados: number;
+  nuevos: number;
+  duplicados: number;
+  respaldos: number;
+  pendientes: boolean;
+}
+
 export interface BuzonService {
   /** GET /gateway/estado */
   estado(signal?: AbortSignal): Promise<EstadoGateway>;
+  /** PUT /buzon */
+  guardar(entrada: EntradaBuzon): Promise<EstadoGateway>;
+  /** POST /buzon/desconectar */
+  desconectar(versionEsperada?: number): Promise<EstadoGateway>;
+  /** POST /buzon/sincronizar */
+  sincronizar(): Promise<ResultadoSincronizacionBuzon>;
+}
+
+/* ---------- Bandeja de correos del conjunto ---------- */
+
+export type EstadoSugerencia = 'EN_REINTENTO' | 'LISTA' | 'FALLIDA';
+
+export interface SugerenciaGuardada {
+  estado: EstadoSugerencia;
+  categoria: string | null;
+  prioridad: string | null;
+  resumen: string | null;
+  justificacion: string | null;
+  proveedor: string;
+  modelo: string;
+  fechaActualizacion: string;
+}
+
+export type EstadoSolicitudCorreo = 'NUEVA' | 'ASIGNADA' | 'EN_PROCESO' | 'RESUELTA' | 'CERRADA';
+
+export interface FilaCorreo {
+  id: number;
+  remitente: string;
+  asunto: string | null;
+  fechaRecepcion: string;
+  idResidente: number | null;
+  residente: string | null;
+  unidad: string | null;
+  idSolicitud: number | null;
+  codigo: string | null;
+  estado: EstadoSolicitudCorreo | null;
+  categoria: string | null;
+  prioridad: string | null;
+  sugerenciaEstado: EstadoSugerencia | null;
+  sugerenciaCategoria: string | null;
+}
+
+export interface FilaCorreoBuzon extends FilaCorreo {
+  extracto: string;
+}
+
+export interface DetalleCorreoBuzon extends FilaCorreo {
+  cuerpo: string;
+  cuerpoEnmascarado: string;
+  sugerencia: SugerenciaGuardada | null;
+}
+
+export interface FiltroCorreos {
+  q?: string;
+  limite?: number;
+  desplazamiento?: number;
+}
+
+export interface ListaCorreosBuzon {
+  total: number;
+  correos: FilaCorreoBuzon[];
+}
+
+export interface CorreosService {
+  /** GET /correos */
+  listar(filtro?: FiltroCorreos, signal?: AbortSignal): Promise<ListaCorreosBuzon>;
+  /** GET /correos/:id */
+  detalle(id: number, signal?: AbortSignal): Promise<DetalleCorreoBuzon>;
 }
 
 /* ---------- Personal del conjunto (usuarios) ---------- */

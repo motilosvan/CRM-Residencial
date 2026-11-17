@@ -11,7 +11,13 @@ vi.mock('@/services', () => ({
   conjuntosService: { listar: (s?: AbortSignal) => listar(s) },
   authService: { salir: () => salir(), sesion: () => Promise.resolve(null) },
   resumenService: { obtener: () => Promise.resolve({ porEstado: [], carga: [], respuesta: [] }) },
-  buzonService: { estado: () => Promise.resolve({ cuentas: [], totalCorreos: 0, ultimoCorreo: null, conectado: false, buzon: null }) },
+  buzonService: {
+    estado: () => Promise.resolve({ cuentas: [], totalCorreos: 0, ultimoCorreo: null, conectado: false, buzon: null }),
+    guardar: vi.fn(),
+    desconectar: vi.fn(),
+    sincronizar: vi.fn(),
+  },
+  correosService: { listar: () => Promise.resolve({ total: 0, correos: [] }), detalle: vi.fn() },
   usuariosService: { listar: () => Promise.resolve([]), agregar: vi.fn(), actualizar: vi.fn() },
 }));
 
@@ -252,6 +258,20 @@ describe('AppLayout', () => {
     useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
     montar('/app/uno/usuarios');
     expect(await screen.findByRole('heading', { name: /personal del conjunto/i })).toBeInTheDocument();
+  });
+
+  it('la ruta bandeja conecta BandejaPage para SOPORTE y ADMIN', async () => {
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/bandeja');
+    expect(await screen.findByRole('heading', { name: /bandeja de correos/i })).toBeInTheDocument();
+    expect(screen.queryByText(/próximamente/i)).not.toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/bandeja');
+    expect(await screen.findByRole('heading', { name: /bandeja de correos/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /conectar buzón de gmail/i })).toBeInTheDocument();
   });
 });
 

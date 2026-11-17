@@ -71,3 +71,57 @@ export const esquemaUsuarioConjunto = z.object({
   version: z.number().int().positive(),
   cuentaActiva: z.boolean(),
 });
+
+export const esquemaResultadoSincronizacion = z.object({
+  revisados: z.number().int().nonnegative(),
+  nuevos: z.number().int().nonnegative(),
+  duplicados: z.number().int().nonnegative(),
+  respaldos: z.number().int().nonnegative(),
+  pendientes: z.boolean(),
+});
+
+const esquemaEstadoSugerencia = z.enum(['EN_REINTENTO', 'LISTA', 'FALLIDA']);
+const esquemaEstadoSolicitud = z.enum(['NUEVA', 'ASIGNADA', 'EN_PROCESO', 'RESUELTA', 'CERRADA']);
+
+export const esquemaSugerenciaGuardada = z.object({
+  estado: esquemaEstadoSugerencia,
+  categoria: z.string().nullable(),
+  prioridad: z.string().nullable(),
+  resumen: z.string().nullable(),
+  justificacion: z.string().nullable(),
+  proveedor: z.string(),
+  modelo: z.string(),
+  fechaActualizacion: z.string(),
+});
+
+const esquemaFilaCorreoBase = z.object({
+  id: z.number().int().positive(),
+  remitente: z.string(),
+  asunto: z.string().nullable(),
+  fechaRecepcion: z.string(),
+  idResidente: z.number().int().positive().nullable(),
+  residente: z.string().nullable(),
+  unidad: z.string().nullable(),
+  idSolicitud: z.number().int().positive().nullable(),
+  codigo: z.string().nullable(),
+  estado: esquemaEstadoSolicitud.nullable(),
+  categoria: z.string().nullable(),
+  prioridad: z.string().nullable(),
+  sugerenciaEstado: esquemaEstadoSugerencia.nullable(),
+  sugerenciaCategoria: z.string().nullable(),
+});
+
+export const esquemaFilaCorreoBuzon = esquemaFilaCorreoBase.extend({
+  extracto: z.string(),
+});
+
+export const esquemaListaCorreos = z.object({
+  total: z.number().int().nonnegative(),
+  correos: z.array(esquemaFilaCorreoBuzon),
+});
+
+export const esquemaDetalleCorreo = esquemaFilaCorreoBase.extend({
+  cuerpo: z.string(),
+  cuerpoEnmascarado: z.string(),
+  sugerencia: esquemaSugerenciaGuardada.nullable(),
+});

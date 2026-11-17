@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router';
+import BandejaPage from '@/features/app/BandejaPage';
 import GuardaConjunto from '@/features/app/GuardaConjunto';
 import GuardaRol from '@/features/app/GuardaRol';
 import InicioPage from '@/features/app/InicioPage';
@@ -10,7 +11,6 @@ import Pagina404 from '@/features/errores/Pagina404';
 import LandingPage from '@/features/landing/LandingPage';
 
 const SECCIONES_PROXIMAS = [
-  'bandeja',
   'solicitudes',
   'validacion',
   'residentes',
@@ -30,6 +30,7 @@ export const rutas: RouteObject[] = [
     children: [
       { index: true, element: <Navigate replace to="inicio" /> },
       { path: 'inicio', element: <InicioPage /> },
+      { path: 'bandeja', element: <BandejaPage /> },
       {
         path: 'usuarios',
         element: (

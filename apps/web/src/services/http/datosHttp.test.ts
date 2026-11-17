@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ErrorApi } from '../contratos';
 import { respuesta, simularFetch } from './ayudas.test-util';
 import { crearBuzonHttp } from './buzonHttp';
+import { crearCorreosHttp } from './correosHttp';
 import { crearResumenHttp } from './resumenHttp';
 import { crearUsuariosHttp } from './usuariosHttp';
 
@@ -87,6 +88,152 @@ describe('buzonHttp', () => {
     const err = await crearBuzonHttp().estado().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ErrorApi);
     expect(err).toMatchObject({ tipo: 'RED', estado: 0 });
+  });
+
+  it('guardar: PUT /api/buzon envía cuerpo y valida EstadoGateway; 422 / 409 → ErrorApi', async () => {
+    const entrada = {
+      correo: 'mesa@demo.mailflow.test',
+      contrasena: 'abcd efgh ijkl mnop',
+      imapHost: 'imap.gmail.com',
+      imapPort: 993,
+      buzon: 'INBOX',
+      diasIniciales: 7,
+      marcarLeido: false,
+      versionEsperada: 1,
+    };
+    const conectado = { ...conError, buzon: { ...conError.buzon, ultimoError: null, version: 2 } };
+    const f = simularFetch(async () => respuesta(200, conectado));
+    expect(await crearBuzonHttp().guardar(entrada)).toEqual(conectado);
+    expect(f.mock.calls[0][0]).toBe('/api/buzon');
+    expect(f.mock.calls[0][1]?.method).toBe('PUT');
+    expect(cuerpoDe(f)).toEqual(entrada);
+
+    simularFetch(async () => respuesta(422, { error: 'El servidor de correo rechazó el inicio de sesión.' }));
+    await expect(crearBuzonHttp().guardar(entrada)).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+      mensaje: 'El servidor de correo rechazó el inicio de sesión.',
+    });
+
+    simularFetch(async () => respuesta(409, { error: 'El buzón cambió (versión 2, se esperaba 1). Recárguelo.' }));
+    await expect(crearBuzonHttp().guardar(entrada)).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+    });
+  });
+
+  it('desconectar: POST /api/buzon/desconectar con versionEsperada; 409 / 404 → ErrorApi', async () => {
+    const desconectado = {
+      ...conError,
+      conectado: false,
+      buzon: { ...conError.buzon, activo: false, version: 3 },
+    };
+    const f = simularFetch(async () => respuesta(200, desconectado));
+    expect(await crearBuzonHttp().desconectar(2)).toEqual(desconectado);
+    expect(f.mock.calls[0][0]).toBe('/api/buzon/desconectar');
+    expect(f.mock.calls[0][1]?.method).toBe('POST');
+    expect(cuerpoDe(f)).toEqual({ versionEsperada: 2 });
+
+    const fSinVersion = simularFetch(async () => respuesta(200, desconectado));
+    await crearBuzonHttp().desconectar();
+    expect(cuerpoDe(fSinVersion)).toEqual({});
+
+    simularFetch(async () => respuesta(409, { error: 'El buzón cambió. Recárguelo.' }));
+    await expect(crearBuzonHttp().desconectar(1)).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+
+    simularFetch(async () => respuesta(404, { error: 'El conjunto no tiene un buzón conectado' }));
+    await expect(crearBuzonHttp().desconectar()).rejects.toMatchObject({ estado: 404, tipo: 'NO_ENCONTRADO' });
+  });
+
+  it('sincronizar: POST /api/buzon/sincronizar valida los 5 contadores; 409 / 422 / forma inválida', async () => {
+    const resultado = { revisados: 4, nuevos: 2, duplicados: 2, respaldos: 0, pendientes: false };
+    const f = simularFetch(async () => respuesta(200, resultado));
+    expect(await crearBuzonHttp().sincronizar()).toEqual(resultado);
+    expect(f.mock.calls[0][0]).toBe('/api/buzon/sincronizar');
+    expect(f.mock.calls[0][1]?.method).toBe('POST');
+
+    simularFetch(async () => respuesta(409, { error: 'Ya hay una sincronización en curso para este conjunto' }));
+    await expect(crearBuzonHttp().sincronizar()).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+
+    simularFetch(async () => respuesta(422, { error: 'El conjunto no tiene un buzón conectado' }));
+    await expect(crearBuzonHttp().sincronizar()).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+
+    simularFetch(async () => respuesta(200, { revisados: 'no' }));
+    await expect(crearBuzonHttp().sincronizar()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+  });
+});
+
+describe('correosHttp', () => {
+  const filaBase = {
+    id: 10,
+    remitente: 'residente@demo.mailflow.test',
+    asunto: 'Fuga de agua en parqueadero',
+    fechaRecepcion: '2026-11-16T10:00:00.000Z',
+    idResidente: 4,
+    residente: 'Elena Vargas',
+    unidad: 'T2-401',
+    idSolicitud: 14,
+    codigo: 'SOL-000014',
+    estado: 'NUEVA' as const,
+    categoria: 'MANTENIMIENTO',
+    prioridad: 'ALTA',
+    sugerenciaEstado: 'LISTA' as const,
+    sugerenciaCategoria: 'MANTENIMIENTO',
+  };
+
+  it('listar: GET /api/correos sin filtros y con q, limite, desplazamiento y signal', async () => {
+    const listaValida = { total: 1, correos: [{ ...filaBase, extracto: 'Hay una fuga desde ayer.' }] };
+    const ctl = new AbortController();
+    const f1 = simularFetch(async () => respuesta(200, listaValida));
+    expect(await crearCorreosHttp().listar(undefined, ctl.signal)).toEqual(listaValida);
+    expect(f1).toHaveBeenCalledWith('/api/correos', expect.objectContaining({ credentials: 'same-origin', signal: ctl.signal }));
+
+    const f2 = simularFetch(async () => respuesta(200, { total: 0, correos: [] }));
+    await crearCorreosHttp().listar({ q: 'fuga', limite: 10, desplazamiento: 20 });
+    expect(f2.mock.calls[0][0]).toBe('/api/correos?q=fuga&limite=10&desplazamiento=20');
+  });
+
+  it('listar: forma inválida → RED; 401/422 → ErrorApi', async () => {
+    simularFetch(async () => respuesta(200, { total: 'uno', correos: [] }));
+    await expect(crearCorreosHttp().listar()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+
+    simularFetch(async () => respuesta(422, { error: 'Parámetros inválidos' }));
+    await expect(crearCorreosHttp().listar({ limite: 0 })).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+
+    simularFetch(async () => respuesta(401, { error: 'Sesión no iniciada' }));
+    await expect(crearCorreosHttp().listar()).rejects.toMatchObject({ estado: 401, tipo: 'NO_AUTENTICADO' });
+  });
+
+  it('detalle: GET /api/correos/:id con y sin sugerencia; 404 y forma inválida', async () => {
+    const detalleConSugerencia = {
+      ...filaBase,
+      cuerpo: 'Hola, soy Elena Vargas de T2-401. Mi cel 3001234567.',
+      cuerpoEnmascarado: 'Hola, soy [NOMBRE_PROTEGIDO] de [UNIDAD_PROTEGIDA]. Mi cel [TEL_PROTEGIDO].',
+      sugerencia: {
+        estado: 'LISTA' as const,
+        categoria: 'MANTENIMIENTO',
+        prioridad: 'ALTA',
+        resumen: 'Fuga de agua reportada en parqueadero.',
+        justificacion: 'Menciona fuga activa en zona común.',
+        proveedor: 'openrouter',
+        modelo: 'gpt-4o-mini',
+        fechaActualizacion: '2026-11-16T10:02:00.000Z',
+      },
+    };
+    const ctl = new AbortController();
+    const f = simularFetch(async () => respuesta(200, detalleConSugerencia));
+    expect(await crearCorreosHttp().detalle(10, ctl.signal)).toEqual(detalleConSugerencia);
+    expect(f).toHaveBeenCalledWith('/api/correos/10', expect.objectContaining({ signal: ctl.signal }));
+
+    const detalleSinSugerencia = { ...detalleConSugerencia, sugerenciaEstado: null, sugerenciaCategoria: null, sugerencia: null };
+    simularFetch(async () => respuesta(200, detalleSinSugerencia));
+    expect(await crearCorreosHttp().detalle(10)).toEqual(detalleSinSugerencia);
+
+    simularFetch(async () => respuesta(404, { error: 'El correo 999 no existe' }));
+    await expect(crearCorreosHttp().detalle(999)).rejects.toMatchObject({ estado: 404, tipo: 'NO_ENCONTRADO' });
+
+    simularFetch(async () => respuesta(200, { ...filaBase, cuerpo: 'solo' }));
+    await expect(crearCorreosHttp().detalle(10)).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
   });
 });
 

@@ -10,7 +10,13 @@ vi.mock('@/services', () => ({
   conjuntosService: { listar: () => Promise.resolve([{ id: 'a', slug: 'uno', nombre: 'Torres de Uno' }]) },
   authService: { sesion: () => Promise.resolve(null), salir: () => Promise.resolve(undefined) },
   resumenService: { obtener: () => Promise.resolve({ porEstado: [], carga: [], respuesta: [] }) },
-  buzonService: { estado: () => Promise.resolve({ cuentas: [], totalCorreos: 0, ultimoCorreo: null, conectado: false, buzon: null }) },
+  buzonService: {
+    estado: () => Promise.resolve({ cuentas: [], totalCorreos: 0, ultimoCorreo: null, conectado: false, buzon: null }),
+    guardar: vi.fn(),
+    desconectar: vi.fn(),
+    sincronizar: vi.fn(),
+  },
+  correosService: { listar: () => Promise.resolve({ total: 0, correos: [] }), detalle: vi.fn() },
   usuariosService: {
     listar: () => Promise.resolve([]),
     agregar: vi.fn(),
