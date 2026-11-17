@@ -997,3 +997,133 @@ export async function obtenerCatalogos(pool: sql.ConnectionPool): Promise<Catalo
     { isolation: 'SNAPSHOT' },
   );
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * Ola 3 (F4): Bitácora unificada de auditoría del conjunto.
+ * ------------------------------------------------------------------------------------------- */
+
+export type TipoEventoAuditoria = 'ESTADO' | 'ASIGNACION' | 'ADMIN';
+
+export interface EventoAuditoria {
+  tipo: TipoEventoAuditoria;
+  entidad: string;
+  codigo: string;
+  accion: string;
+  actor: string;
+  detalle: string | null;
+  fecha: Date;
+}
+
+export const FiltroAuditoriaSchema = z.object({
+  q: z.string().trim().max(200).optional(),
+  limite: z.number().int().min(1).max(200).default(50),
+  desplazamiento: z.number().int().min(0).default(0),
+});
+export type FiltroAuditoria = z.input<typeof FiltroAuditoriaSchema>;
+
+const AUDITORIA_CTE = `
+  WITH eventos AS (
+    SELECT CAST('ESTADO' AS VARCHAR(12)) AS tipo,
+           CAST('SOLICITUD' AS VARCHAR(20)) AS entidad,
+           'SOL-' + RIGHT('000000' + CAST(s.idSolicitud AS VARCHAR(10)), 6) AS codigo,
+           CASE
+             WHEN ea.nombre IS NULL THEN N'Creada en ' + CAST(en.nombre AS NVARCHAR(30))
+             ELSE CAST(ea.nombre AS NVARCHAR(30)) + N' → ' + CAST(en.nombre AS NVARCHAR(30))
+           END AS accion,
+           COALESCE(u.nombre, N'Sistema') AS actor,
+           CAST(h.comentario AS NVARCHAR(500)) AS detalle,
+           CAST(h.fecha AS DATETIME2) AS fecha
+      FROM dbo.HISTORIAL_ESTADOS h
+      JOIN dbo.SOLICITUDES s ON s.idSolicitud = h.idSolicitud
+      JOIN dbo.CORREOS c ON c.idCorreo = s.idCorreo
+      LEFT JOIN dbo.ESTADOS ea ON ea.idEstado = h.idEstadoAnterior
+      JOIN dbo.ESTADOS en ON en.idEstado = h.idEstadoNuevo
+      LEFT JOIN dbo.USUARIOS u ON u.idUsuario = h.idUsuario
+     WHERE c.idConjunto = @idConjunto
+
+    UNION ALL
+
+    SELECT CAST('ASIGNACION' AS VARCHAR(12)) AS tipo,
+           CAST('SOLICITUD' AS VARCHAR(20)) AS entidad,
+           'SOL-' + RIGHT('000000' + CAST(s.idSolicitud AS VARCHAR(10)), 6) AS codigo,
+           CASE
+             WHEN a.liberadaEn IS NULL THEN N'Asignación'
+             ELSE N'Asignación (liberada)'
+           END AS accion,
+           COALESCE(upor.nombre, N'Sistema') AS actor,
+           CAST(N'Responsable: ' + uresp.nombre AS NVARCHAR(500)) AS detalle,
+           CAST(a.fechaAsignacion AS DATETIME2) AS fecha
+      FROM dbo.ASIGNACIONES a
+      JOIN dbo.SOLICITUDES s ON s.idSolicitud = a.idSolicitud
+      JOIN dbo.CORREOS c ON c.idCorreo = s.idCorreo
+      JOIN dbo.USUARIOS uresp ON uresp.idUsuario = a.idUsuario
+      LEFT JOIN dbo.USUARIOS upor ON upor.idUsuario = a.asignadaPor
+     WHERE c.idConjunto = @idConjunto
+
+    UNION ALL
+
+    SELECT CAST('ADMIN' AS VARCHAR(12)) AS tipo,
+           aa.entidad,
+           aa.entidad + '#' + CAST(aa.idEntidad AS VARCHAR(12)) AS codigo,
+           CAST(aa.accion AS NVARCHAR(65)) AS accion,
+           COALESCE(u.nombre, N'Sistema') AS actor,
+           CAST(aa.detalle AS NVARCHAR(500)) AS detalle,
+           aa.fecha
+      FROM dbo.AUDITORIA_ADMIN aa
+      LEFT JOIN dbo.USUARIOS u ON u.idUsuario = aa.idUsuario
+     WHERE aa.idConjunto = @idConjunto
+  )`;
+
+const AUDITORIA_FILTRO = `
+  WHERE (@patron IS NULL
+     OR codigo  LIKE @patron ESCAPE '\\'
+     OR actor   LIKE @patron ESCAPE '\\'
+     OR accion  LIKE @patron ESCAPE '\\'
+     OR detalle LIKE @patron ESCAPE '\\'
+     OR entidad LIKE @patron ESCAPE '\\')`;
+
+/**
+ * Bitácora paginada del conjunto en aislamiento SNAPSHOT. Une cambios de estado (`HISTORIAL_ESTADOS`),
+ * asignaciones (`ASIGNACIONES`) y auditoría administrativa (`AUDITORIA_ADMIN`), ordenados por `fecha DESC`.
+ */
+export async function listarAuditoriaConjunto(
+  pool: sql.ConnectionPool,
+  idConjunto: number,
+  filtro: FiltroAuditoria = {},
+): Promise<{ total: number; eventos: EventoAuditoria[] }> {
+  const conj = validar(IdConjuntoSchema, idConjunto);
+  const f = validar(FiltroAuditoriaSchema, filtro);
+  const patron = patronLike(f.q);
+  return withTx(
+    pool,
+    async (tx) => {
+      const total = (
+        await tx
+          .request()
+          .input('idConjunto', sql.Int, conj)
+          .input('patron', sql.NVarChar(450), patron)
+          .query<{ total: number }>(`${AUDITORIA_CTE} SELECT COUNT(*) AS total FROM eventos ${AUDITORIA_FILTRO}`)
+      ).recordset[0]!.total;
+
+      const eventos = (
+        await tx
+          .request()
+          .input('idConjunto', sql.Int, conj)
+          .input('patron', sql.NVarChar(450), patron)
+          .input('lim', sql.Int, f.limite)
+          .input('desp', sql.Int, f.desplazamiento)
+          .query<EventoAuditoria>(
+            `${AUDITORIA_CTE}
+             SELECT tipo, entidad, codigo, accion, actor, detalle, fecha
+               FROM eventos
+             ${AUDITORIA_FILTRO}
+              ORDER BY fecha DESC
+             OFFSET @desp ROWS FETCH NEXT @lim ROWS ONLY`,
+          )
+      ).recordset;
+
+      return { total, eventos };
+    },
+    { isolation: 'SNAPSHOT' },
+  );
+}

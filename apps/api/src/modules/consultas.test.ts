@@ -6,7 +6,7 @@ import { PALABRAS_CLAVE_URGENCIA, PRIORIDAD_BASE_POR_CATEGORIA } from '../domain
 import { crearUsuario, setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { ValidationError } from '../errors.js';
 import { asignar } from './asignaciones.js';
-import { colaValidacion, obtenerCatalogos } from './consultas.js';
+import { colaValidacion, listarAuditoriaConjunto, obtenerCatalogos } from './consultas.js';
 import { ingestarCorreo } from './ingesta.js';
 import { crearResidenteConjunto } from './residentes.js';
 import { cambiarEstado, reclasificar, type Actor } from './solicitudes.js';
@@ -275,5 +275,158 @@ describe('obtenerCatalogos', () => {
     expect(new Set(cat.transiciones.map((t) => `${t.origen}>${t.destino}`))).toEqual(
       new Set(TRANSICIONES.map(([o, d]) => `${o}>${d}`)),
     );
+  });
+});
+
+describe('listarAuditoriaConjunto', () => {
+  it('une las 3 fuentes (HISTORIAL_ESTADOS, ASIGNACIONES, AUDITORIA_ADMIN), aísla conjuntos, filtra por q y pagina', async () => {
+    const a = await nuevoConjunto();
+    const nA = n;
+    const b = await nuevoConjunto();
+
+    // 1. AUDITORIA_ADMIN en A y en B (aislamiento)
+    const resA = await crearResidenteConjunto(db.pool, a.admin, {
+      nombre: 'Residente Audit A',
+      unidad: 'T1-101',
+      correo: `aud-res-a-${n}@demo.mailflow.test`,
+    });
+    await crearResidenteConjunto(db.pool, b.admin, {
+      nombre: 'Residente Audit B',
+      unidad: 'T2-202',
+      correo: `aud-res-b-${n}@demo.mailflow.test`,
+    });
+
+    // 2. Ingesta en A y B → HISTORIAL_ESTADOS ('Creada en NUEVA', actor Sistema)
+    const ingA = await ingestarCorreo(db.pool, {
+      messageId: `<aud-a-${n}>`,
+      remitente: `aud-res-a-${n}@demo.mailflow.test`,
+      asunto: 'Fuga en pasillo',
+      cuerpo: 'Hay una fuga de agua',
+      idConjunto: a.id,
+    });
+    const ingB = await ingestarCorreo(db.pool, {
+      messageId: `<aud-b-${n}>`,
+      remitente: `aud-res-b-${n}@demo.mailflow.test`,
+      asunto: 'Solicitud B',
+      cuerpo: 'Cuerpo B',
+      idConjunto: b.id,
+    });
+    if (ingA.duplicado || ingB.duplicado) throw new Error('duplicado inesperado');
+    const codigoA = `SOL-${String(ingA.idSolicitud).padStart(6, '0')}`;
+    const codigoB = `SOL-${String(ingB.idSolicitud).padStart(6, '0')}`;
+
+    // 3. Asignación en A y luego liberación al reasignar
+    const asig1 = await asignar(db.pool, {
+      idSolicitud: ingA.idSolicitud,
+      idResponsable: a.soporte.idUsuario,
+      idAsignador: a.admin.idUsuario,
+      versionEsperada: 1,
+    });
+    if (asig1.sinCambios) throw new Error('asignación esperada');
+
+    const asig2 = await asignar(db.pool, {
+      idSolicitud: ingA.idSolicitud,
+      idResponsable: a.admin.idUsuario,
+      idAsignador: a.admin.idUsuario,
+      versionEsperada: asig1.version,
+    });
+    if (asig2.sinCambios) throw new Error('reasignación esperada');
+
+    await cambiarEstado(
+      db.pool,
+      {
+        idSolicitud: ingA.idSolicitud,
+        nuevoEstado: 'EN_PROCESO',
+        idUsuario: a.admin.idUsuario,
+        versionEsperada: asig2.version,
+        comentario: 'Atendiendo_fuga 100%',
+      },
+      undefined,
+      a.admin,
+    );
+
+    const todosA = await listarAuditoriaConjunto(db.pool, a.id);
+    // Esperados en A:
+    // - AUDITORIA_ADMIN: RESIDENTE#<id> CREAR (1)
+    // - HISTORIAL_ESTADOS: Creada en NUEVA, NUEVA → ASIGNADA, ASIGNADA → ASIGNADA, ASIGNADA → EN_PROCESO (4)
+    // - ASIGNACIONES: Asignación (liberada) (Soporte) y Asignación (Admin) (2)
+    expect(todosA.total).toBe(7);
+    expect(todosA.eventos).toHaveLength(7);
+
+    // Ordenado por fecha DESC
+    for (let i = 1; i < todosA.eventos.length; i++) {
+      expect(todosA.eventos[i - 1]!.fecha.getTime()).toBeGreaterThanOrEqual(todosA.eventos[i]!.fecha.getTime());
+    }
+
+    // No contiene nada del conjunto B
+    expect(todosA.eventos.some((e) => e.codigo === codigoB)).toBe(false);
+
+    // Verifica las 3 fuentes
+    const adminEv = todosA.eventos.find((e) => e.tipo === 'ADMIN');
+    expect(adminEv).toMatchObject({
+      tipo: 'ADMIN',
+      entidad: 'RESIDENTE',
+      codigo: `RESIDENTE#${resA.id}`,
+      accion: 'CREAR',
+      actor: `Admin ${nA}`,
+    });
+
+    const estadoCreada = todosA.eventos.find((e) => e.tipo === 'ESTADO' && e.accion === 'Creada en NUEVA');
+    expect(estadoCreada).toMatchObject({
+      tipo: 'ESTADO',
+      entidad: 'SOLICITUD',
+      codigo: codigoA,
+      accion: 'Creada en NUEVA',
+      actor: 'Sistema',
+    });
+
+    const estadoProceso = todosA.eventos.find((e) => e.tipo === 'ESTADO' && e.accion === 'ASIGNADA → EN_PROCESO');
+    expect(estadoProceso).toMatchObject({
+      tipo: 'ESTADO',
+      entidad: 'SOLICITUD',
+      codigo: codigoA,
+      actor: `Admin ${nA}`,
+      detalle: 'Atendiendo_fuga 100%',
+    });
+
+    const asigLiberada = todosA.eventos.find((e) => e.tipo === 'ASIGNACION' && e.accion === 'Asignación (liberada)');
+    expect(asigLiberada).toMatchObject({
+      tipo: 'ASIGNACION',
+      entidad: 'SOLICITUD',
+      codigo: codigoA,
+      actor: `Admin ${nA}`,
+      detalle: `Responsable: Soporte ${nA}`,
+    });
+
+    const asigVigente = todosA.eventos.find((e) => e.tipo === 'ASIGNACION' && e.accion === 'Asignación');
+    expect(asigVigente).toMatchObject({
+      tipo: 'ASIGNACION',
+      entidad: 'SOLICITUD',
+      codigo: codigoA,
+      actor: `Admin ${nA}`,
+      detalle: `Responsable: Admin ${nA}`,
+    });
+
+    // Filtro ?q= con comodines escapados (_ y %)
+    const porDetalle = await listarAuditoriaConjunto(db.pool, a.id, { q: '_fuga 100%' });
+    expect(porDetalle.total).toBe(1);
+    expect(porDetalle.eventos[0]!.accion).toBe('ASIGNADA → EN_PROCESO');
+
+    const porEntidad = await listarAuditoriaConjunto(db.pool, a.id, { q: 'RESIDENTE#' });
+    expect(porEntidad.total).toBe(1);
+    expect(porEntidad.eventos[0]!.tipo).toBe('ADMIN');
+
+    // Paginación
+    const pag1 = await listarAuditoriaConjunto(db.pool, a.id, { limite: 3, desplazamiento: 0 });
+    const pag2 = await listarAuditoriaConjunto(db.pool, a.id, { limite: 3, desplazamiento: 3 });
+    expect(pag1.total).toBe(7);
+    expect(pag1.eventos).toHaveLength(3);
+    expect(pag2.total).toBe(7);
+    expect(pag2.eventos).toHaveLength(3);
+
+    // Validación de parámetros
+    await expect(listarAuditoriaConjunto(db.pool, 0)).rejects.toThrow(ValidationError);
+    await expect(listarAuditoriaConjunto(db.pool, a.id, { limite: 0 })).rejects.toThrow(ValidationError);
+    await expect(listarAuditoriaConjunto(db.pool, a.id, { desplazamiento: -1 })).rejects.toThrow(ValidationError);
   });
 });

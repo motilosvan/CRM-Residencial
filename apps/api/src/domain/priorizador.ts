@@ -1,4 +1,4 @@
-import { normalizar, palabrasDePatrones, type Categoria } from './clasificador.js';
+import { normalizar, palabrasClasificacion, palabrasCoincidentes, palabrasDePatrones, type Categoria } from './clasificador.js';
 
 export const PRIORIDADES = ['ALTA', 'MEDIA', 'BAJA'] as const;
 export type Prioridad = (typeof PRIORIDADES)[number];
@@ -26,6 +26,19 @@ const URGENTES: RegExp[] = [
 
 /** Palabras clave de urgencia derivadas de `URGENTES` sin duplicar la lista. */
 export const PALABRAS_CLAVE_URGENCIA: readonly string[] = palabrasDePatrones(URGENTES);
+
+/** Señales de urgencia que coinciden en asunto o cuerpo. */
+export function palabrasUrgencia(asunto: string, cuerpo: string): string[] {
+  return palabrasCoincidentes(`${asunto} ${cuerpo}`, URGENTES);
+}
+
+/**
+ * Palabras clave y señales de urgencia que coincidieron en la clasificación y priorización,
+ * sin duplicados y conservando el orden de aparición en las reglas.
+ */
+export function palabrasDetectadas(asunto: string, cuerpo: string): string[] {
+  return Array.from(new Set([...palabrasClasificacion(asunto, cuerpo), ...palabrasUrgencia(asunto, cuerpo)]));
+}
 
 /**
  * Ajusta una prioridad que no calculó este módulo (p. ej. la sugerida por una IA) a la regla del negocio:

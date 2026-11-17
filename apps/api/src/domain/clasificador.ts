@@ -63,6 +63,22 @@ export function palabrasDePatrones(patrones: readonly RegExp[]): readonly string
   return Object.freeze(patrones.map((p) => p.source.replace(/\\b/g, '')));
 }
 
+/** Devuelve las palabras/raíces de `patrones` que coinciden en `texto` (sin duplicados). */
+export function palabrasCoincidentes(texto: string, patrones: readonly RegExp[]): string[] {
+  const norm = normalizar(texto);
+  return [...palabrasDePatrones(patrones.filter((p) => p.test(norm)))];
+}
+
+/** Palabras clave del clasificador que coinciden en el asunto o cuerpo. */
+export function palabrasClasificacion(asunto: string, cuerpo: string): string[] {
+  const norm = normalizar(`${asunto} ${cuerpo}`);
+  const encontradas: string[] = [];
+  for (const regla of REGLAS) {
+    encontradas.push(...palabrasDePatrones(regla.patrones.filter((p) => p.test(norm))));
+  }
+  return Array.from(new Set(encontradas));
+}
+
 /** Reglas del clasificador en orden de desempate, derivadas de `REGLAS` sin duplicar listas. */
 export const REGLAS_CATEGORIA: ReadonlyArray<{
   categoria: Exclude<Categoria, 'SIN_CLASIFICAR'>;

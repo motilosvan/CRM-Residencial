@@ -1,6 +1,10 @@
 import fastifyCookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type sql from 'mssql';
+import { z } from 'zod';
+import { clasificar } from '../domain/clasificador.js';
+import { enmascarar } from '../domain/enmascarar.js';
+import { palabrasDetectadas, priorizar } from '../domain/priorizador.js';
 import { ConflictError, ErrorAcceso, Forbidden, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
 import { solicitarCodigo, verificarCodigo, type DepsAcceso } from '../modules/acceso.js';
 import { asignar } from '../modules/asignaciones.js';
@@ -12,6 +16,7 @@ import {
   detalleSolicitud,
   estadoGateway,
   generarReporte,
+  listarAuditoriaConjunto,
   listarCorreos,
   listarSolicitudes,
   listarUsuariosConjunto,
@@ -26,7 +31,7 @@ import {
   vincularCorreoResidente,
 } from '../modules/residentes.js';
 import { cambiarConjuntoActivo, crearSesion, leerSesion, revocarSesion, type SesionActiva, type SesionPublica } from '../modules/sesiones.js';
-import { cambiarEstado, reclasificar, type Actor } from '../modules/solicitudes.js';
+import { cambiarEstado, reclasificar, validar, type Actor } from '../modules/solicitudes.js';
 import { aceptarSugerencia } from '../modules/sugerencias.js';
 import { actualizarMembresiaUsuario, guardarUsuarioConjunto } from '../modules/usuarios.js';
 
@@ -114,6 +119,15 @@ const actorDe = (s: SesionActiva): Actor => ({
 });
 
 const versionDe = (b: Record<string, unknown>): unknown => b.versionEsperada ?? b.version;
+
+const LaboratorioSchema = z
+  .object({
+    asunto: z.string().max(500).default(''),
+    cuerpo: z.string().max(20000).default(''),
+  })
+  .refine((d) => d.asunto.trim().length > 0 || d.cuerpo.trim().length > 0, {
+    message: 'Indique al menos un asunto o un cuerpo para probar',
+  });
 
 /** Limitador simple en memoria por IP (ventana fija) para rutas de acceso OTP. */
 function crearLimitadorIp(cfg?: OpcionesApp['limitePeticiones']) {
@@ -370,6 +384,30 @@ export function construirApp({ pool, hostsPermitidos, acceso, buzon, limitePetic
   );
 
   app.get('/api/catalogos', soloAdmin, async () => obtenerCatalogos(pool));
+
+  app.get('/api/auditoria', soloAdmin, async (req) => {
+    const q = req.query as Record<string, unknown>;
+    return listarAuditoriaConjunto(pool, req.sesion.idConjuntoActivo, {
+      q: texto(q.q),
+      limite: numero(q.limite),
+      desplazamiento: numero(q.desplazamiento),
+    });
+  });
+
+  app.post('/api/laboratorio/probar', protegida, async (req) => {
+    const { asunto, cuerpo } = validar(LaboratorioSchema, req.body ?? {});
+    const asuntoEnmascarado = enmascarar(asunto);
+    const cuerpoEnmascarado = enmascarar(cuerpo);
+    const categoria = clasificar(asunto, cuerpo);
+    const prioridad = priorizar(categoria, asunto, cuerpo);
+    return {
+      asuntoEnmascarado,
+      cuerpoEnmascarado,
+      categoria,
+      prioridad,
+      palabrasDetectadas: palabrasDetectadas(asunto, cuerpo),
+    };
+  });
 
   app.get('/api/resumen', protegida, async (req) => resumen(pool, req.sesion.idConjuntoActivo));
 

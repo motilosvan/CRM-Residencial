@@ -10,6 +10,7 @@ import { CORREOS_EJEMPLO } from '../../test/fixtures/correos.js';
 import { destinosDesde, ESTADOS, puedeTransicionar } from './estados.js';
 import {
   PALABRAS_CLAVE_URGENCIA,
+  palabrasDetectadas,
   PRIORIDAD_BASE_POR_CATEGORIA,
   PRIORIDADES,
   priorizar,
@@ -142,5 +143,18 @@ describe('metadatos puros de dominio (catálogos)', () => {
     for (const p of PALABRAS_CLAVE_URGENCIA) expect(p).not.toContain('\\b');
     expect(PALABRAS_CLAVE_URGENCIA).toContain('urgente');
     expect(PALABRAS_CLAVE_URGENCIA).toContain('fuga de gas');
+  });
+
+  it('palabrasDetectadas extrae palabras clave y señales de urgencia sin duplicados', () => {
+    expect(palabrasDetectadas('', '')).toEqual([]);
+    expect(palabrasDetectadas('Hola', 'buenas tardes')).toEqual([]);
+    const d1 = palabrasDetectadas('Robo en portería', 'Es urgente, hubo un disparo y robo');
+    expect(d1).toEqual(['robo', 'porteri', 'disparo', 'urgente']);
+    const d2 = palabrasDetectadas('Fuga de gas en cocina', 'Olor a gas');
+    expect(d2).toContain('fuga');
+    expect(d2).toContain('gas');
+    expect(d2).toContain('fuga de gas');
+    expect(d2).toContain('olor a gas');
+    expect(new Set(d2).size).toBe(d2.length);
   });
 });
