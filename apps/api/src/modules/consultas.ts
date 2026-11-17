@@ -452,6 +452,8 @@ export interface UsuarioConjunto {
   activo: boolean;
   /** Versión de la membresía: el panel la devuelve como `versionEsperada` al editarla. */
   version: number;
+  /** `USUARIOS.activo`: false = cuenta deshabilitada en la plataforma (no puede entrar aunque la membresía esté activa). */
+  cuentaActiva: boolean;
 }
 
 const FiltroUsuariosSchema = z.object({
@@ -479,7 +481,7 @@ export async function listarUsuariosConjunto(
         .input('rol', sql.VarChar(30), f.rol ?? null)
         .input('todos', sql.Bit, f.incluirInactivos ?? false)
         .query<UsuarioConjunto>(
-          `SELECT u.idUsuario AS id, u.nombre, u.correo, m.rol, m.activo, m.version
+          `SELECT u.idUsuario AS id, u.nombre, u.correo, m.rol, m.activo, m.version, u.activo AS cuentaActiva
              FROM USUARIO_CONJUNTOS m
              JOIN USUARIOS u ON u.idUsuario = m.idUsuario
             WHERE m.idConjunto = @idConjunto AND (@todos = 1 OR (m.activo = 1 AND u.activo = 1))

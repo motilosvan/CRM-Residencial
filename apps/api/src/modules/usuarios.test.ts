@@ -82,7 +82,7 @@ describe('guardarUsuarioConjunto', () => {
   it('crea un usuario nuevo con membresía, normaliza y audita sin datos personales', async () => {
     const c = await nuevoConjunto();
     const u = await guardarUsuarioConjunto(db.pool, c.admin, { nombre: '  Luz Pérez ', correo: '  Luz.Perez@Demo.Mailflow.Test ', rol: 'SOPORTE' });
-    expect(u).toEqual({ id: expect.any(Number), nombre: 'Luz Pérez', correo: 'luz.perez@demo.mailflow.test', rol: 'SOPORTE', activo: true, version: 1 });
+    expect(u).toEqual({ id: expect.any(Number), nombre: 'Luz Pérez', correo: 'luz.perez@demo.mailflow.test', rol: 'SOPORTE', activo: true, version: 1, cuentaActiva: true });
     const filas = (await auditoria(c.id)).filter((f) => f.idEntidad === u.id);
     expect(filas).toHaveLength(1);
     expect(filas[0]).toMatchObject({ idUsuario: c.admin.idUsuario, entidad: 'USUARIO', accion: 'CREAR' });
@@ -115,14 +115,17 @@ describe('guardarUsuarioConjunto', () => {
     expect(acciones).toEqual(['CREAR', 'DESACTIVAR', 'ACTIVAR']);
   });
 
-  it('reactiva al usuario si estaba inactivo globalmente', async () => {
+  it('rechaza con 422 a un usuario deshabilitado en la plataforma: no lo reactiva ni audita', async () => {
     const c = await nuevoConjunto();
     const id = await crearUsuario(db, { nombre: 'Inactivo', correo: `inactivo-${n}@demo.mailflow.test`, rol: 'SOPORTE', slug: c.slug, activo: false });
-    const r = await guardarUsuarioConjunto(db.pool, c.admin, { nombre: 'Inactivo', correo: `inactivo-${n}@demo.mailflow.test`, rol: 'SOPORTE' });
-    expect(r.id).toBe(id);
-    expect(r.activo).toBe(true);
+    const antes = (await auditoria(c.id)).length;
+    await expect(
+      guardarUsuarioConjunto(db.pool, c.admin, { nombre: 'Inactivo', correo: `inactivo-${n}@demo.mailflow.test`, rol: 'ADMIN' }),
+    ).rejects.toThrow(new ValidationError('Esa cuenta está deshabilitada en la plataforma; no se puede agregar al conjunto'));
     const u = await db.q<{ activo: boolean }>(`SELECT activo FROM dbo.USUARIOS WHERE idUsuario = ${id}`);
-    expect(u[0]!.activo).toBe(true);
+    expect(u[0]!.activo).toBe(false);
+    expect(await auditoria(c.id)).toHaveLength(antes);
+    expect((await membresia(id, c.id))?.rol).toBe('SOPORTE');
   });
 
   it('409 si ya es miembro activo', async () => {
@@ -284,7 +287,37 @@ describe('actualizarMembresiaUsuario', () => {
       actualizarMembresiaUsuario(db.pool, actorDe(c, b.id), c.admin.idUsuario, { activo: false, versionEsperada: 1 }),
     ]);
     expect(r.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
+    const perdedor = r.find((x) => x.status === 'rejected') as PromiseRejectedResult;
+    expect([ValidationError, Forbidden].some((E) => perdedor.reason instanceof E)).toBe(true);
     expect(await adminsActivos(c.id)).toBe(1);
+  });
+
+  it('carrera: A desactiva a B mientras B asciende a un SOPORTE; nunca se aplica el ascenso de un B ya desactivado', async () => {
+    const c = await nuevoConjunto();
+    const b = await guardarUsuarioConjunto(db.pool, c.admin, { nombre: 'B', correo: `b-${n}@demo.mailflow.test`, rol: 'ADMIN' });
+    // Un tercero tiene el candado del conjunto: A y B llegan a él en orden FIFO (A primero) y esperan.
+    const candado = new sql.Transaction(db.pool);
+    await candado.begin();
+    await new sql.Request(candado)
+      .input('c', sql.Int, c.id)
+      .query('SELECT idConjunto FROM dbo.CONJUNTOS WITH (UPDLOCK, HOLDLOCK) WHERE idConjunto = @c');
+    const bloqueadas = async () =>
+      (await db.q<{ n: number }>("SELECT COUNT(*) AS n FROM sys.dm_exec_requests WHERE blocking_session_id > 0 AND wait_type LIKE 'LCK%'"))[0]!.n;
+    const esperar = async (n2: number) => {
+      for (let i = 0; i < 200 && (await bloqueadas()) < n2; i++) await new Promise((r) => setTimeout(r, 25));
+      expect(await bloqueadas()).toBeGreaterThanOrEqual(n2);
+    };
+    const pA = actualizarMembresiaUsuario(db.pool, c.admin, b.id, { activo: false, versionEsperada: b.version });
+    await esperar(1);
+    const pB = actualizarMembresiaUsuario(db.pool, actorDe(c, b.id), c.soporte.idUsuario, { rol: 'ADMIN', versionEsperada: 1 });
+    await esperar(2);
+    await candado.rollback();
+    const [rA, rB] = await Promise.allSettled([pA, pB]);
+    expect(rA.status).toBe('fulfilled');
+    expect(rB.status).toBe('rejected');
+    expect((rB as PromiseRejectedResult).reason).toBeInstanceOf(Forbidden);
+    expect((await membresia(c.soporte.idUsuario, c.id))?.rol).toBe('SOPORTE');
+    expect((await membresia(b.id, c.id))?.activo).toBe(false);
   });
 
   it('permite desactivar a quien tiene solicitudes asignadas (la BD no lo impide) y no toca las asignaciones', async () => {

@@ -40,6 +40,19 @@ export type CambioMembresia = z.input<typeof CambioMembresiaSchema>;
 
 const IdUsuarioSchema = z.number().int().positive();
 
+/**
+ * Punto de serialización de las escrituras de personal de un conjunto. Va ANTES de `exigirRol` para que la
+ * autorización del actor se lea ya serializada (un ADMIN que otra transacción está desactivando no puede
+ * pasar la comprobación, esperar el candado y completar su cambio). Orden de bloqueo fijo:
+ * CONJUNTOS -> USUARIOS -> USUARIO_CONJUNTOS.
+ */
+async function bloquearConjunto(tx: Tx, idConjunto: number): Promise<void> {
+  await tx
+    .request()
+    .input('c', sql.Int, idConjunto)
+    .query('SELECT idConjunto FROM CONJUNTOS WITH (UPDLOCK, HOLDLOCK) WHERE idConjunto = @c');
+}
+
 /** Membresía del usuario en el conjunto, sin filtrar por estado (el listado oculta las inactivas). */
 async function leerMembresia(tx: Tx, idConjunto: number, idUsuario: number): Promise<UsuarioConjunto> {
   const r = await tx
@@ -47,7 +60,7 @@ async function leerMembresia(tx: Tx, idConjunto: number, idUsuario: number): Pro
     .input('u', sql.Int, idUsuario)
     .input('c', sql.Int, idConjunto)
     .query<UsuarioConjunto>(
-      `SELECT u.idUsuario AS id, u.nombre, u.correo, m.rol, m.activo, m.version
+      `SELECT u.idUsuario AS id, u.nombre, u.correo, m.rol, m.activo, m.version, u.activo AS cuentaActiva
          FROM USUARIO_CONJUNTOS m
          JOIN USUARIOS u ON u.idUsuario = m.idUsuario
         WHERE m.idUsuario = @u AND m.idConjunto = @c`,
@@ -60,13 +73,14 @@ const auditar = (tx: Tx, actor: Actor, idUsuario: number, accion: 'CREAR' | 'ACT
 
 /**
  * Agrega a una persona al personal del conjunto del actor. Si el correo ya es un usuario (quizá de otro
- * conjunto) se reutiliza SIN cambiarle el nombre y, si estaba inactivo en general, se reactiva. Una
+ * conjunto) se reutiliza SIN cambiarle el nombre y, si está deshabilitado en general (`USUARIOS.activo = 0`), se rechaza con 422. Una
  * membresía inactiva se reactiva con el rol pedido; una activa da 409.
  */
 export async function guardarUsuarioConjunto(pool: sql.ConnectionPool, actor: Actor, entrada: EntradaUsuario): Promise<UsuarioConjunto> {
   const a = validar(ActorSchema, actor);
   const e = validar(EntradaUsuarioSchema, entrada);
   return withTx(pool, async (tx) => {
+    await bloquearConjunto(tx, a.idConjunto);
     await exigirRol(tx, actor, ['ADMIN'], 'administrar el personal del conjunto');
 
     const existente = (
@@ -92,9 +106,10 @@ export async function guardarUsuarioConjunto(pool: sql.ConnectionPool, actor: Ac
       ).recordset[0]!.id;
     } else {
       idUsuario = existente.idUsuario;
+      // USUARIOS.activo = 0 es un bloqueo deliberado fuera de banda (ninguna ruta lo escribe): un ADMIN de
+      // un conjunto no puede levantarlo. La semilla es la vía de recuperación.
       if (!existente.activo) {
-        await tx.request().input('id', sql.Int, idUsuario).query('UPDATE USUARIOS SET activo = 1 WHERE idUsuario = @id');
-        await auditar(tx, actor, idUsuario, 'ACTIVAR', 'Usuario reactivado al agregarlo al conjunto');
+        throw new ValidationError('Esa cuenta está deshabilitada en la plataforma; no se puede agregar al conjunto');
       }
     }
 
@@ -142,12 +157,8 @@ export async function actualizarMembresiaUsuario(
   const id = validar(IdUsuarioSchema, idUsuario);
   const c = validar(CambioMembresiaSchema, cambio);
   return withTx(pool, async (tx) => {
+    await bloquearConjunto(tx, a.idConjunto);
     await exigirRol(tx, actor, ['ADMIN'], 'administrar el personal del conjunto');
-    // Punto de serialización de las escrituras de personal de este conjunto.
-    await tx
-      .request()
-      .input('c', sql.Int, a.idConjunto)
-      .query('SELECT idConjunto FROM CONJUNTOS WITH (UPDLOCK, HOLDLOCK) WHERE idConjunto = @c');
 
     const actual = (
       await tx
@@ -169,6 +180,8 @@ export async function actualizarMembresiaUsuario(
     const cambiaActivo = activo !== actual.activo;
     if (!cambiaRol && !cambiaActivo) return leerMembresia(tx, a.idConjunto, id);
 
+    // El UPDLOCK/HOLDLOCK del conteo es defensa en profundidad: el punto de serialización real es el
+    // candado de CONJUNTOS tomado al inicio.
     if (actual.rol === 'ADMIN' && actual.activo && (rol !== 'ADMIN' || !activo)) {
       const otros = (
         await tx

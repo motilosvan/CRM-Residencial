@@ -93,7 +93,18 @@ describe('POST /api/usuarios', () => {
       payload: { nombre: ' Nueva Persona ', correo: 'Nueva@Demo.Mailflow.Test', rol: 'SOPORTE' },
     });
     expect(r.statusCode).toBe(201);
-    expect(r.json()).toEqual({ id: expect.any(Number), nombre: 'Nueva Persona', correo: 'nueva@demo.mailflow.test', rol: 'SOPORTE', activo: true, version: 1 });
+    expect(r.json()).toEqual({ id: expect.any(Number), nombre: 'Nueva Persona', correo: 'nueva@demo.mailflow.test', rol: 'SOPORTE', activo: true, version: 1, cuentaActiva: true });
+  });
+
+  it('422 si la cuenta está deshabilitada en la plataforma', async () => {
+    const correo = 'deshabilitado@demo.mailflow.test';
+    await crearUsuario(db, { nombre: 'Deshabilitado', correo, rol: 'SOPORTE', slug: 'usr-http-a', activo: false });
+    const r = await req('POST', '/api/usuarios', {
+      cookie: cookieAdminA,
+      payload: { nombre: 'Deshabilitado', correo, rol: 'ADMIN' },
+    });
+    expect(r.statusCode).toBe(422);
+    expect(r.json()).toEqual({ error: 'Esa cuenta está deshabilitada en la plataforma; no se puede agregar al conjunto' });
   });
 
   it('409 si ya es miembro activo', async () => {
@@ -149,7 +160,7 @@ describe('PATCH /api/usuarios/:id', () => {
   it('200 con el UsuarioConjunto actualizado, y 409 con la versión vieja', async () => {
     const r = await req('PATCH', `/api/usuarios/${idSoporteA}`, { cookie: cookieAdminA, payload: { rol: 'ADMIN', versionEsperada: 1 } });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ id: idSoporteA, nombre: 'Soporte A', correo: 'sop-a@demo.mailflow.test', rol: 'ADMIN', activo: true, version: 2 });
+    expect(r.json()).toEqual({ id: idSoporteA, nombre: 'Soporte A', correo: 'sop-a@demo.mailflow.test', rol: 'ADMIN', activo: true, version: 2, cuentaActiva: true });
     const viejo = await req('PATCH', `/api/usuarios/${idSoporteA}`, { cookie: cookieAdminA, payload: { rol: 'SOPORTE', versionEsperada: 1 } });
     expect(viejo.statusCode).toBe(409);
     // restaurar: soporteA vuelve a SOPORTE para no afectar otras pruebas
