@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ErrorApi } from '../contratos';
+import { crearAuditoriaMock } from './auditoriaMock';
 import { CODIGO_DEMO, crearAuthMock } from './authMock';
 import { crearBuzonMock } from './buzonMock';
 import { crearCatalogosMock } from './catalogosMock';
@@ -8,6 +9,8 @@ import { crearCorreosMock } from './correosMock';
 import { CATALOGOS_DEMO, CORREOS_DEMO, RESIDENTES_DEMO, SOLICITUDES_DEMO } from './datos';
 import { crearEstadoPanelMock } from './estadoCompartido';
 import { crearIdentidadMock } from './identidadMock';
+import { crearLaboratorioMock } from './laboratorioMock';
+import { crearReportesMock } from './reportesMock';
 import { crearResidentesMock } from './residentesMock';
 import { crearResumenMock } from './resumenMock';
 import { getSesionMock, setSesionMock } from './sesionMockEstado';
@@ -858,5 +861,63 @@ describe('identidadMock y catalogosMock', () => {
     const promesa = crearCatalogosMock({ latenciaMs: [50, 50] }).obtener(ctl.signal);
     ctl.abort();
     await expect(promesa).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('reportesMock, auditoriaMock y laboratorioMock', () => {
+  it('reportesMock filtra por fechas, rechaza 422 si desde > hasta y genera CSV válido', async () => {
+    const srv = crearReportesMock(SIN_LATENCIA);
+    const completo = await srv.obtener();
+    expect(completo.totales.total).toBe(SOLICITUDES_DEMO.length);
+    expect(completo.porEstado.reduce((acc, e) => acc + e.n, 0)).toBe(completo.totales.total);
+
+    await expect(srv.obtener({ desde: '2026-11-20', hasta: '2026-11-01' })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+
+    const vacio = await srv.obtener({ desde: '2099-01-01', hasta: '2099-01-31' });
+    expect(vacio.totales.total).toBe(0);
+    expect(vacio.global.porcentajeSla).toBeNull();
+
+    const csv = await srv.descargarCsv();
+    expect(csv.startsWith('seccion,concepto,cantidad,minutos_promedio,dentro_sla,porcentaje_sla\r\n')).toBe(true);
+    expect(csv).toContain('estado,NUEVA,');
+  });
+
+  it('auditoriaMock incluye las 3 fuentes, filtra por q y pagina', async () => {
+    const srv = crearAuditoriaMock(SIN_LATENCIA);
+    const todos = await srv.listar({ limite: 20, desplazamiento: 0 });
+    expect(todos.total).toBeGreaterThanOrEqual(3);
+    expect(new Set(todos.eventos.map((e) => e.tipo))).toEqual(new Set(['ESTADO', 'ASIGNACION', 'ADMIN']));
+
+    const porCodigo = await srv.listar({ q: 'SOL-000001' });
+    expect(porCodigo.eventos.every((e) => e.codigo === 'SOL-000001')).toBe(true);
+
+    const pag = await srv.listar({ limite: 2, desplazamiento: 2 });
+    expect(pag.eventos).toHaveLength(2);
+    expect(pag.total).toBe(todos.total);
+  });
+
+  it('laboratorioMock enmascara datos Ley 1581, clasifica/prioriza y rechaza 422 si ambos vacíos', async () => {
+    const srv = crearLaboratorioMock(SIN_LATENCIA);
+    await expect(srv.probar({ asunto: '   ', cuerpo: '' })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+
+    const res = await srv.probar({
+      asunto: 'Robo en apto 302 — urgente',
+      cuerpo: 'Soy Residente Demo, CC 1023456789, cel 3101234567, correo residente@demo.mailflow.test, placa ABC123.',
+    });
+    expect(res.asuntoEnmascarado).toContain('[UNIDAD_PROTEGIDA]');
+    expect(res.cuerpoEnmascarado).toContain('[NOMBRE_PROTEGIDO]');
+    expect(res.cuerpoEnmascarado).toContain('[DOC_PROTEGIDO]');
+    expect(res.cuerpoEnmascarado).toContain('[TEL_PROTEGIDO]');
+    expect(res.cuerpoEnmascarado).toContain('[CORREO_PROTEGIDO]');
+    expect(res.cuerpoEnmascarado).toContain('[PLACA_PROTEGIDA]');
+    expect(res.categoria).toBe('SEGURIDAD');
+    expect(res.prioridad).toBe('ALTA');
+    expect(res.palabrasDetectadas.length).toBeGreaterThan(0);
   });
 });

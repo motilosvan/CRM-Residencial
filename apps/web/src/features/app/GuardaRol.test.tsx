@@ -53,6 +53,26 @@ vi.mock('@/services', () => ({
         transiciones: [],
       }),
   },
+  reportesService: {
+    obtener: () =>
+      Promise.resolve({
+        periodo: { desde: null, hasta: null },
+        totales: { total: 0, abiertas: 0, resueltas: 0, cerradas: 0 },
+        porEstado: [],
+        porCategoria: [],
+        porPrioridad: [],
+        respuesta: [],
+        global: { totalConRespuesta: 0, minutosPromedio: null, dentroSla: 0, porcentajeSla: null },
+        carga: [],
+      }),
+    descargarCsv: vi.fn(),
+  },
+  auditoriaService: {
+    listar: () => Promise.resolve({ total: 0, eventos: [] }),
+  },
+  laboratorioService: {
+    probar: vi.fn(),
+  },
 }));
 
 import { rutas } from '@/router';
@@ -219,5 +239,65 @@ describe('GuardaRol', () => {
       </QueryClientProvider>,
     );
     expect(await screen.findByRole('heading', { name: /catálogos del dominio/i })).toBeInTheDocument();
+  });
+
+  it('SOPORTE entrando por URL a /reportes o /auditoria ve 403, ADMIN accede a ambas y SOPORTE accede a /laboratorio-ia', async () => {
+    ponerSesion('SOPORTE');
+    const qc1 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r1 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/reportes'] });
+    render(
+      <QueryClientProvider client={qc1}>
+        <RouterProvider router={r1} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+
+    cleanup();
+
+    ponerSesion('SOPORTE');
+    const qc2 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r2 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/auditoria'] });
+    render(
+      <QueryClientProvider client={qc2}>
+        <RouterProvider router={r2} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+
+    cleanup();
+
+    ponerSesion('SOPORTE');
+    const qc3 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r3 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/laboratorio-ia'] });
+    render(
+      <QueryClientProvider client={qc3}>
+        <RouterProvider router={r3} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(/ejecución en memoria sin escritura/i)).toBeInTheDocument();
+
+    cleanup();
+
+    ponerSesion('ADMIN');
+    const qc4 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r4 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/reportes'] });
+    render(
+      <QueryClientProvider client={qc4}>
+        <RouterProvider router={r4} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Reportes', level: 2 })).toBeInTheDocument();
+
+    cleanup();
+
+    ponerSesion('ADMIN');
+    const qc5 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r5 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/auditoria'] });
+    render(
+      <QueryClientProvider client={qc5}>
+        <RouterProvider router={r5} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: /auditoría global/i })).toBeInTheDocument();
   });
 });

@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ErrorApi } from '../contratos';
 import { respuesta, simularFetch } from './ayudas.test-util';
+import { crearAuditoriaHttp } from './auditoriaHttp';
 import { crearBuzonHttp } from './buzonHttp';
 import { crearCatalogosHttp } from './catalogosHttp';
 import { crearCorreosHttp } from './correosHttp';
 import { crearIdentidadHttp } from './identidadHttp';
+import { crearLaboratorioHttp } from './laboratorioHttp';
+import { crearReportesHttp } from './reportesHttp';
 import { crearResidentesHttp } from './residentesHttp';
 import { crearResumenHttp } from './resumenHttp';
 import { crearSolicitudesHttp } from './solicitudesHttp';
@@ -839,5 +842,106 @@ describe('catalogosHttp', () => {
 
     simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede acceder a este recurso' }));
     await expect(crearCatalogosHttp().obtener()).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+  });
+});
+
+describe('reportesHttp', () => {
+  const reporteValido = {
+    periodo: { desde: '2026-11-01T00:00:00.000Z', hasta: '2026-11-16T23:59:59.999Z' },
+    totales: { total: 4, abiertas: 2, resueltas: 1, cerradas: 1 },
+    porEstado: [{ estado: 'NUEVA', n: 1 }],
+    porCategoria: [{ categoria: 'SEGURIDAD', n: 2 }],
+    porPrioridad: [{ prioridad: 'ALTA', n: 2 }],
+    respuesta: [{ categoria: 'SEGURIDAD', total: 2, minutosPromedio: 30, dentroSla: 2, porcentajeSla: 100 }],
+    global: { totalConRespuesta: 2, minutosPromedio: 30, dentroSla: 2, porcentajeSla: 100 },
+    carga: [{ idUsuario: 2, nombre: 'Soporte Demo', abiertas: 2, resueltasEnPeriodo: 1 }],
+  };
+
+  it('obtener: GET /api/reportes con filtros y signal; 422 y forma inválida → ErrorApi', async () => {
+    const ctl = new AbortController();
+    const f = simularFetch(async () => respuesta(200, reporteValido));
+    expect(await crearReportesHttp().obtener({ desde: '2026-11-01', hasta: '2026-11-16' }, ctl.signal)).toEqual(
+      reporteValido,
+    );
+    expect(f).toHaveBeenCalledWith(
+      '/api/reportes?desde=2026-11-01&hasta=2026-11-16',
+      expect.objectContaining({ credentials: 'same-origin', signal: ctl.signal }),
+    );
+
+    simularFetch(async () => respuesta(422, { error: 'La fecha inicial debe ser menor o igual a la final' }));
+    await expect(crearReportesHttp().obtener({ desde: '2026-11-20', hasta: '2026-11-01' })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+
+    simularFetch(async () => respuesta(200, { totales: 'mal' }));
+    await expect(crearReportesHttp().obtener()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+  });
+
+  it('descargarCsv: GET /api/reportes?formato=csv devuelve texto plano y propaga 403/500', async () => {
+    const csv = 'seccion,concepto,cantidad,minutos_promedio,dentro_sla,porcentaje_sla\r\n';
+    const f = simularFetch(async () => new Response(csv, { status: 200, headers: { 'Content-Type': 'text/csv' } }));
+    expect(await crearReportesHttp().descargarCsv({ desde: '2026-11-01' })).toBe(csv);
+    expect(f.mock.calls[0][0]).toBe('/api/reportes?desde=2026-11-01&formato=csv');
+
+    simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede consultar reportes' }));
+    await expect(crearReportesHttp().descargarCsv()).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+  });
+});
+
+describe('auditoriaHttp', () => {
+  const auditoriaValida = {
+    total: 1,
+    eventos: [
+      {
+        tipo: 'ESTADO' as const,
+        entidad: 'SOLICITUD',
+        codigo: 'SOL-000001',
+        accion: 'Creada en NUEVA',
+        actor: 'Sistema',
+        detalle: null,
+        fecha: '2026-11-16T15:20:00.000Z',
+      },
+    ],
+  };
+
+  it('listar: GET /api/auditoria con q, limite, desplazamiento y signal', async () => {
+    const ctl = new AbortController();
+    const f = simularFetch(async () => respuesta(200, auditoriaValida));
+    expect(await crearAuditoriaHttp().listar({ q: 'SOL-000001', limite: 10, desplazamiento: 0 }, ctl.signal)).toEqual(
+      auditoriaValida,
+    );
+    expect(f).toHaveBeenCalledWith(
+      '/api/auditoria?q=SOL-000001&limite=10&desplazamiento=0',
+      expect.objectContaining({ credentials: 'same-origin', signal: ctl.signal }),
+    );
+
+    simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede acceder a este recurso' }));
+    await expect(crearAuditoriaHttp().listar()).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+  });
+});
+
+describe('laboratorioHttp', () => {
+  const resultadoValido = {
+    asuntoEnmascarado: 'Robo en [UNIDAD_PROTEGIDA]',
+    cuerpoEnmascarado: 'Soy [NOMBRE_PROTEGIDO], cel [TEL_PROTEGIDO].',
+    categoria: 'SEGURIDAD' as const,
+    prioridad: 'ALTA' as const,
+    palabrasDetectadas: ['robo', 'urgente'],
+  };
+
+  it('probar: POST /api/laboratorio/probar envía JSON y valida respuesta; 422 → ErrorApi', async () => {
+    const f = simularFetch(async () => respuesta(200, resultadoValido));
+    const entrada = { asunto: 'Robo en apto 302', cuerpo: 'Soy Residente Demo, cel 3101234567.' };
+    expect(await crearLaboratorioHttp().probar(entrada)).toEqual(resultadoValido);
+    expect(f.mock.calls[0][0]).toBe('/api/laboratorio/probar');
+    expect(f.mock.calls[0][1]?.method).toBe('POST');
+    expect(cuerpoDe(f)).toEqual(entrada);
+
+    simularFetch(async () => respuesta(422, { error: 'Escribe al menos un asunto o un cuerpo' }));
+    await expect(crearLaboratorioHttp().probar({ asunto: '', cuerpo: '' })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
   });
 });

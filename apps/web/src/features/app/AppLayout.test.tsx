@@ -43,6 +43,26 @@ vi.mock('@/services', () => ({
         transiciones: [],
       }),
   },
+  reportesService: {
+    obtener: () =>
+      Promise.resolve({
+        periodo: { desde: null, hasta: null },
+        totales: { total: 0, abiertas: 0, resueltas: 0, cerradas: 0 },
+        porEstado: [],
+        porCategoria: [],
+        porPrioridad: [],
+        respuesta: [],
+        global: { totalConRespuesta: 0, minutosPromedio: null, dentroSla: 0, porcentajeSla: null },
+        carga: [],
+      }),
+    descargarCsv: vi.fn(),
+  },
+  auditoriaService: {
+    listar: () => Promise.resolve({ total: 0, eventos: [] }),
+  },
+  laboratorioService: {
+    probar: vi.fn(),
+  },
 }));
 
 const seguir = vi.fn();
@@ -264,11 +284,34 @@ describe('AppLayout', () => {
     expect(await screen.findByRole('heading', { name: 'Inicio' })).toBeInTheDocument();
   });
 
-  it('las secciones próximas muestran el estado vacío con su título', async () => {
+  it('con rol SOPORTE reportes y auditoria muestran 403, con ADMIN cargan y laboratorio-ia carga para SOPORTE', async () => {
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/reportes');
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/auditoria');
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/laboratorio-ia');
+    expect(await screen.findByText(/ejecución en memoria sin escritura/i)).toBeInTheDocument();
+
+    cleanup();
+
     useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
     montar('/app/uno/reportes');
-    expect(await screen.findByRole('heading', { name: 'Reportes' })).toBeInTheDocument();
-    expect(screen.getByText(/próximamente/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Reportes', level: 2 })).toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/auditoria');
+    expect(await screen.findByRole('heading', { name: /auditoría global/i })).toBeInTheDocument();
   });
 
   it('con rol SOPORTE identidad y catalogos muestran 403 y con ADMIN cargan sus páginas', async () => {

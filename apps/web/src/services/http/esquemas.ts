@@ -278,3 +278,65 @@ export const esquemaCatalogosDominio = z.object({
   estados: z.array(esquemaCatalogoEstado),
   transiciones: z.array(esquemaCatalogoTransicion),
 });
+
+export const esquemaReporteSolicitudes = z.object({
+  periodo: z.object({
+    desde: z.string().nullable(),
+    hasta: z.string().nullable(),
+  }),
+  totales: z.object({
+    total: z.number().int().nonnegative(),
+    abiertas: z.number().int().nonnegative(),
+    resueltas: z.number().int().nonnegative(),
+    cerradas: z.number().int().nonnegative(),
+  }),
+  porEstado: z.array(z.object({ estado: z.string(), n: z.number().int().nonnegative() })),
+  porCategoria: z.array(z.object({ categoria: z.string(), n: z.number().int().nonnegative() })),
+  porPrioridad: z.array(z.object({ prioridad: z.string(), n: z.number().int().nonnegative() })),
+  respuesta: z.array(
+    z.object({
+      categoria: z.string(),
+      total: z.number().int().nonnegative(),
+      minutosPromedio: z.number(),
+      dentroSla: z.number().int().nonnegative(),
+      porcentajeSla: z.number(),
+    }),
+  ),
+  global: z.object({
+    totalConRespuesta: z.number().int().nonnegative(),
+    minutosPromedio: z.number().nullable(),
+    dentroSla: z.number().int().nonnegative(),
+    porcentajeSla: z.number().nullable(),
+  }),
+  carga: z.array(
+    z.object({
+      idUsuario: z.number().int().positive(),
+      nombre: z.string(),
+      abiertas: z.number().int().nonnegative(),
+      resueltasEnPeriodo: z.number().int().nonnegative(),
+    }),
+  ),
+});
+
+export const esquemaEventoAuditoria = z.object({
+  tipo: z.enum(['ESTADO', 'ASIGNACION', 'ADMIN']),
+  entidad: z.string(),
+  codigo: z.string(),
+  accion: z.string(),
+  actor: z.string(),
+  detalle: z.string().nullable(),
+  fecha: z.string(),
+});
+
+export const esquemaRespuestaAuditoria = z.object({
+  total: z.number().int().nonnegative(),
+  eventos: z.array(esquemaEventoAuditoria),
+});
+
+export const esquemaResultadoLaboratorio = z.object({
+  asuntoEnmascarado: z.string(),
+  cuerpoEnmascarado: z.string(),
+  categoria: esquemaCategoriaSolicitud,
+  prioridad: esquemaPrioridadSolicitud,
+  palabrasDetectadas: z.array(z.string()),
+});

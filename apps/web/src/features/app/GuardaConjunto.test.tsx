@@ -51,6 +51,26 @@ vi.mock('@/services', () => ({
         transiciones: [],
       }),
   },
+  reportesService: {
+    obtener: () =>
+      Promise.resolve({
+        periodo: { desde: null, hasta: null },
+        totales: { total: 0, abiertas: 0, resueltas: 0, cerradas: 0 },
+        porEstado: [],
+        porCategoria: [],
+        porPrioridad: [],
+        respuesta: [],
+        global: { totalConRespuesta: 0, minutosPromedio: null, dentroSla: 0, porcentajeSla: null },
+        carga: [],
+      }),
+    descargarCsv: vi.fn(),
+  },
+  auditoriaService: {
+    listar: () => Promise.resolve({ total: 0, eventos: [] }),
+  },
+  laboratorioService: {
+    probar: vi.fn(),
+  },
 }));
 const aplicarTema = vi.fn();
 vi.mock('@/tema/aplicarTema', () => ({ aplicarTema: (...a: unknown[]) => aplicarTema(...a) }));

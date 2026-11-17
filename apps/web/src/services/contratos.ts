@@ -543,3 +543,123 @@ export interface CatalogosService {
   /** GET /catalogos */
   obtener(signal?: AbortSignal): Promise<CatalogosDominio>;
 }
+
+/* ---------- Reportes, Auditoría Global y Laboratorio IA (Ola 3) ---------- */
+
+export interface ReportePeriodo {
+  desde: string | null;
+  hasta: string | null;
+}
+
+export interface ReporteTotales {
+  total: number;
+  abiertas: number;
+  resueltas: number;
+  cerradas: number;
+}
+
+export interface ReportePorEstado {
+  estado: string;
+  n: number;
+}
+
+export interface ReportePorCategoria {
+  categoria: string;
+  n: number;
+}
+
+export interface ReportePorPrioridad {
+  prioridad: string;
+  n: number;
+}
+
+export interface ReporteRespuestaCategoria {
+  categoria: string;
+  total: number;
+  minutosPromedio: number;
+  dentroSla: number;
+  porcentajeSla: number;
+}
+
+export interface ReporteGlobal {
+  totalConRespuesta: number;
+  minutosPromedio: number | null;
+  dentroSla: number;
+  porcentajeSla: number | null;
+}
+
+export interface ReporteCargaUsuario {
+  idUsuario: number;
+  nombre: string;
+  abiertas: number;
+  resueltasEnPeriodo: number;
+}
+
+export interface ReporteSolicitudes {
+  periodo: ReportePeriodo;
+  totales: ReporteTotales;
+  porEstado: ReportePorEstado[];
+  porCategoria: ReportePorCategoria[];
+  porPrioridad: ReportePorPrioridad[];
+  respuesta: ReporteRespuestaCategoria[];
+  global: ReporteGlobal;
+  carga: ReporteCargaUsuario[];
+}
+
+export interface FiltroReporte {
+  desde?: string;
+  hasta?: string;
+}
+
+export interface ReportesService {
+  /** GET /reportes */
+  obtener(filtro?: FiltroReporte, signal?: AbortSignal): Promise<ReporteSolicitudes>;
+  /** GET /reportes?formato=csv */
+  descargarCsv(filtro?: FiltroReporte, signal?: AbortSignal): Promise<string>;
+}
+
+export type TipoEventoAuditoria = 'ESTADO' | 'ASIGNACION' | 'ADMIN';
+
+export interface EventoAuditoria {
+  tipo: TipoEventoAuditoria;
+  entidad: string;
+  codigo: string;
+  accion: string;
+  actor: string;
+  detalle: string | null;
+  fecha: string;
+}
+
+export interface FiltroAuditoria {
+  q?: string;
+  limite?: number;
+  desplazamiento?: number;
+}
+
+export interface RespuestaAuditoria {
+  total: number;
+  eventos: EventoAuditoria[];
+}
+
+export interface AuditoriaService {
+  /** GET /auditoria */
+  listar(filtro?: FiltroAuditoria, signal?: AbortSignal): Promise<RespuestaAuditoria>;
+}
+
+export interface EntradaLaboratorio {
+  asunto: string;
+  cuerpo: string;
+}
+
+export interface ResultadoLaboratorio {
+  asuntoEnmascarado: string;
+  cuerpoEnmascarado: string;
+  categoria: CategoriaSolicitud;
+  prioridad: PrioridadSolicitud;
+  palabrasDetectadas: string[];
+}
+
+export interface LaboratorioService {
+  /** POST /laboratorio/probar */
+  probar(entrada: EntradaLaboratorio, signal?: AbortSignal): Promise<ResultadoLaboratorio>;
+}
