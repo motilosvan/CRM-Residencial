@@ -3,9 +3,11 @@ import { ErrorApi } from '../contratos';
 import { respuesta, simularFetch } from './ayudas.test-util';
 import { crearBuzonHttp } from './buzonHttp';
 import { crearCorreosHttp } from './correosHttp';
+import { crearResidentesHttp } from './residentesHttp';
 import { crearResumenHttp } from './resumenHttp';
 import { crearSolicitudesHttp } from './solicitudesHttp';
 import { crearUsuariosHttp } from './usuariosHttp';
+import { crearValidacionHttp } from './validacionHttp';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -521,5 +523,205 @@ describe('solicitudesHttp', () => {
       estado: 422,
       tipo: 'INVALIDO',
     });
+  });
+});
+
+describe('residentesHttp', () => {
+  const residenteBase = {
+    id: 101,
+    nombre: 'Elena Vargas',
+    unidad: 'T2-401',
+    correo: 'elena.vargas@demo.mailflow.test',
+    telefono: '3004567890',
+    activo: true,
+    version: 1,
+    totalSolicitudes: 2,
+  };
+
+  it('listar: GET /api/residentes sin filtros, con q y soloActivos, pasa signal y valida forma', async () => {
+    const ctl = new AbortController();
+    const f1 = simularFetch(async () => respuesta(200, [residenteBase]));
+    expect(await crearResidentesHttp().listar(undefined, ctl.signal)).toEqual([residenteBase]);
+    expect(f1).toHaveBeenCalledWith(
+      '/api/residentes',
+      expect.objectContaining({ credentials: 'same-origin', signal: ctl.signal }),
+    );
+
+    const f2 = simularFetch(async () => respuesta(200, [residenteBase]));
+    await crearResidentesHttp().listar({ q: 'elena', soloActivos: true });
+    expect(f2.mock.calls[0][0]).toBe('/api/residentes?q=elena&soloActivos=true');
+
+    const f3 = simularFetch(async () => respuesta(200, []));
+    await crearResidentesHttp().listar({ soloActivos: false });
+    expect(f3.mock.calls[0][0]).toBe('/api/residentes?soloActivos=false');
+
+    simularFetch(async () => respuesta(200, [{ id: 'mal' }]));
+    await expect(crearResidentesHttp().listar()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+
+    simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede consultar los residentes' }));
+    await expect(crearResidentesHttp().listar()).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+  });
+
+  it('crear: POST /api/residentes devuelve 201 ResidenteConjunto; 409 duplicado y 422', async () => {
+    const entrada = {
+      nombre: 'Elena Vargas',
+      unidad: 'T2-401',
+      correo: 'elena.vargas@demo.mailflow.test',
+      telefono: '3004567890',
+    };
+    const f = simularFetch(async () => respuesta(201, residenteBase));
+    expect(await crearResidentesHttp().crear(entrada)).toEqual(residenteBase);
+    expect(f.mock.calls[0][0]).toBe('/api/residentes');
+    expect(f.mock.calls[0][1]?.method).toBe('POST');
+    expect(cuerpoDe(f)).toEqual(entrada);
+
+    simularFetch(async () => respuesta(409, { error: 'Ya existe un residente con ese correo en el conjunto' }));
+    await expect(crearResidentesHttp().crear(entrada)).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+      mensaje: 'Ya existe un residente con ese correo en el conjunto',
+    });
+
+    simularFetch(async () => respuesta(422, { error: 'Datos inválidos' }));
+    await expect(crearResidentesHttp().crear({ nombre: '', unidad: '101' })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+  });
+
+  it('actualizar: PATCH /api/residentes/:id envía versionEsperada; 409 / 404 / 422', async () => {
+    const actualizado = { ...residenteBase, unidad: 'T2-402', version: 2 };
+    const f = simularFetch(async () => respuesta(200, actualizado));
+    expect(await crearResidentesHttp().actualizar(101, { unidad: 'T2-402', versionEsperada: 1 })).toEqual(actualizado);
+    expect(f.mock.calls[0][0]).toBe('/api/residentes/101');
+    expect(f.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(cuerpoDe(f)).toEqual({ unidad: 'T2-402', versionEsperada: 1 });
+
+    simularFetch(async () => respuesta(409, { error: 'El residente cambió (versión 2, se esperaba 1). Recárguelo.' }));
+    await expect(crearResidentesHttp().actualizar(101, { activo: false, versionEsperada: 1 })).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+    });
+
+    simularFetch(async () => respuesta(404, { error: 'El residente no existe en el conjunto' }));
+    await expect(crearResidentesHttp().actualizar(999, { activo: false, versionEsperada: 1 })).rejects.toMatchObject({
+      estado: 404,
+      tipo: 'NO_ENCONTRADO',
+    });
+
+    simularFetch(async () => respuesta(422, { error: 'Datos inválidos' }));
+    await expect(crearResidentesHttp().actualizar(101, { correo: 'mal', versionEsperada: 2 })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+  });
+
+  it('vincularCorreo: POST /api/correos/:id/vincular-residente con idResidente o nuevo residente; 409/422/404', async () => {
+    const detalleVinculado = {
+      id: 2,
+      remitente: 'visitante.ext@demo.mailflow.test',
+      asunto: 'Consulta de trasteo',
+      fechaRecepcion: '2026-11-16T13:45:00.000Z',
+      idResidente: 101,
+      residente: 'Elena Vargas',
+      unidad: 'T2-401',
+      idSolicitud: 21,
+      codigo: 'SOL-000021',
+      estado: 'NUEVA' as const,
+      categoria: 'ADMINISTRATIVO',
+      prioridad: 'MEDIA',
+      sugerenciaEstado: null,
+      sugerenciaCategoria: null,
+      cuerpo: 'Hola',
+      cuerpoEnmascarado: 'Hola',
+      sugerencia: null,
+    };
+
+    const f1 = simularFetch(async () => respuesta(200, detalleVinculado));
+    expect(await crearResidentesHttp().vincularCorreo(2, { idResidente: 101 })).toEqual(detalleVinculado);
+    expect(f1.mock.calls[0][0]).toBe('/api/correos/2/vincular-residente');
+    expect(f1.mock.calls[0][1]?.method).toBe('POST');
+    expect(cuerpoDe(f1)).toEqual({ idResidente: 101 });
+
+    const f2 = simularFetch(async () => respuesta(200, detalleVinculado));
+    await crearResidentesHttp().vincularCorreo(2, {
+      residente: { nombre: 'Luis Vega', unidad: 'T1-101', telefono: '3001112233', usarCorreoRemitente: true },
+    });
+    expect(cuerpoDe(f2)).toEqual({
+      residente: { nombre: 'Luis Vega', unidad: 'T1-101', telefono: '3001112233', usarCorreoRemitente: true },
+    });
+
+    simularFetch(async () => respuesta(422, { error: 'No se puede vincular un correo a un residente inactivo' }));
+    await expect(crearResidentesHttp().vincularCorreo(2, { idResidente: 111 })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+
+    simularFetch(async () => respuesta(409, { error: 'Ya existe un residente con ese correo en el conjunto' }));
+    await expect(
+      crearResidentesHttp().vincularCorreo(2, { residente: { nombre: 'Dup', unidad: '101' } }),
+    ).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+  });
+});
+
+describe('validacionHttp', () => {
+  it('obtener: GET /api/validacion pasa signal y valida sugerencias + remitentesSinResidente', async () => {
+    const cola = {
+      sugerencias: [
+        {
+          idSolicitud: 21,
+          codigo: 'SOL-000021',
+          asunto: 'Solicitud de información para ingreso de trasteo',
+          remitente: 'visitante.ext@demo.mailflow.test',
+          fechaCreacion: '2026-11-16T13:45:00.000Z',
+          estado: 'NUEVA' as const,
+          categoriaActual: 'SIN_CLASIFICAR' as const,
+          prioridadActual: 'MEDIA' as const,
+          version: 1,
+          sugerencia: {
+            categoria: 'ADMINISTRATIVO' as const,
+            prioridad: 'BAJA' as const,
+            resumen: 'Consulta sobre horarios y requisitos de portería para mudanza.',
+            justificacion: 'Trámite administrativo de mudanza sin urgencia inmediata.',
+            proveedor: 'openrouter',
+            modelo: 'gpt-4o-mini',
+            fechaActualizacion: '2026-11-16T13:46:00.000Z',
+          },
+        },
+      ],
+      remitentesSinResidente: [
+        {
+          id: 2,
+          remitente: 'visitante.ext@demo.mailflow.test',
+          asunto: 'Solicitud de información para ingreso de trasteo',
+          fechaRecepcion: '2026-11-16T13:45:00.000Z',
+          idResidente: null,
+          residente: null,
+          unidad: null,
+          idSolicitud: 21,
+          codigo: 'SOL-000021',
+          estado: 'NUEVA' as const,
+          categoria: 'SIN_CLASIFICAR',
+          prioridad: 'MEDIA',
+          sugerenciaEstado: 'LISTA' as const,
+          sugerenciaCategoria: 'ADMINISTRATIVO',
+          extracto: 'Cordial saludo...',
+        },
+      ],
+    };
+
+    const ctl = new AbortController();
+    const f = simularFetch(async () => respuesta(200, cola));
+    expect(await crearValidacionHttp().obtener(ctl.signal)).toEqual(cola);
+    expect(f).toHaveBeenCalledWith(
+      '/api/validacion',
+      expect.objectContaining({ credentials: 'same-origin', signal: ctl.signal }),
+    );
+
+    simularFetch(async () => respuesta(200, { sugerencias: 'mal' }));
+    await expect(crearValidacionHttp().obtener()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+
+    simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede consultar la cola de validación' }));
+    await expect(crearValidacionHttp().obtener()).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
   });
 });

@@ -202,3 +202,42 @@ export const esquemaResultadoReclasificacion = z.object({
   version: z.number().int().positive(),
   sinCambios: z.boolean(),
 });
+
+export const esquemaResidenteConjunto = z.object({
+  id: z.number().int().positive(),
+  nombre: z.string(),
+  unidad: z.string(),
+  correo: z.string().nullable(),
+  telefono: z.string().nullable(),
+  activo: z.boolean(),
+  version: z.number().int().positive(),
+  totalSolicitudes: z.number().int().nonnegative(),
+});
+
+export const esquemaListaResidentes = z.array(esquemaResidenteConjunto);
+
+export const esquemaSugerenciaPendienteValidacion = z.object({
+  idSolicitud: z.number().int().positive(),
+  codigo: z.string(),
+  asunto: z.string().nullable(),
+  remitente: z.string(),
+  fechaCreacion: z.string(),
+  estado: esquemaEstadoSolicitud,
+  categoriaActual: esquemaCategoriaSolicitud,
+  prioridadActual: esquemaPrioridadSolicitud,
+  version: z.number().int().positive(),
+  sugerencia: z.object({
+    categoria: esquemaCategoriaSolicitud,
+    prioridad: esquemaPrioridadSolicitud,
+    resumen: z.string(),
+    justificacion: z.string().nullable(),
+    proveedor: z.string(),
+    modelo: z.string(),
+    fechaActualizacion: z.string(),
+  }),
+});
+
+export const esquemaColaValidacion = z.object({
+  sugerencias: z.array(esquemaSugerenciaPendienteValidacion),
+  remitentesSinResidente: z.array(esquemaFilaCorreoBuzon),
+});

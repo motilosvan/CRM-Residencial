@@ -27,6 +27,8 @@ vi.mock('@/services', () => ({
     aceptarSugerencia: vi.fn(),
   },
   usuariosService: { listar: () => Promise.resolve([]), agregar: vi.fn(), actualizar: vi.fn() },
+  residentesService: { listar: () => Promise.resolve([]), crear: vi.fn(), actualizar: vi.fn(), vincularCorreo: vi.fn() },
+  validacionService: { obtener: () => Promise.resolve({ sugerencias: [], remitentesSinResidente: [] }) },
 }));
 
 const seguir = vi.fn();
@@ -250,9 +252,34 @@ describe('AppLayout', () => {
 
   it('las secciones próximas muestran el estado vacío con su título', async () => {
     useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
-    montar('/app/uno/residentes');
-    expect(await screen.findByRole('heading', { name: 'Residentes' })).toBeInTheDocument();
+    montar('/app/uno/catalogos');
+    expect(await screen.findByRole('heading', { name: 'Catálogos' })).toBeInTheDocument();
     expect(screen.getByText(/próximamente/i)).toBeInTheDocument();
+  });
+
+  it('con rol SOPORTE validacion y residentes muestran 403 y con ADMIN cargan sus páginas', async () => {
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/validacion');
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/validacion');
+    expect(await screen.findByRole('heading', { name: /cola de validación/i })).toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/residentes');
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/residentes');
+    expect(await screen.findByRole('heading', { name: /directorio de residentes/i })).toBeInTheDocument();
   });
 
   it('con rol SOPORTE la ruta usuarios muestra 403 y con ADMIN muestra UsuariosPage', async () => {

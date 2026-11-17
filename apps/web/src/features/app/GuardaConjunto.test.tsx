@@ -35,6 +35,8 @@ vi.mock('@/services', () => ({
     aceptarSugerencia: vi.fn(),
   },
   usuariosService: { listar: () => Promise.resolve([]), agregar: vi.fn(), actualizar: vi.fn() },
+  residentesService: { listar: () => Promise.resolve([]), crear: vi.fn(), actualizar: vi.fn(), vincularCorreo: vi.fn() },
+  validacionService: { obtener: () => Promise.resolve({ sugerencias: [], remitentesSinResidente: [] }) },
 }));
 const aplicarTema = vi.fn();
 vi.mock('@/tema/aplicarTema', () => ({ aplicarTema: (...a: unknown[]) => aplicarTema(...a) }));

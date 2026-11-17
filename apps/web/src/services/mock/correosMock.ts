@@ -1,10 +1,12 @@
 import { ErrorApi, type CorreosService, type DetalleCorreoBuzon, type FilaCorreoBuzon } from '../contratos';
 import { CORREOS_DEMO } from './datos';
+import type { EstadoPanelMock } from './estadoCompartido';
 import type { OpcionesMock } from './tipos';
 import { esperar, fallaRedApi } from './util';
 
 export interface OpcionesCorreosMock extends OpcionesMock {
   iniciales?: DetalleCorreoBuzon[];
+  estado?: EstadoPanelMock;
 }
 
 function aFila(c: DetalleCorreoBuzon): FilaCorreoBuzon {
@@ -28,7 +30,7 @@ function aFila(c: DetalleCorreoBuzon): FilaCorreoBuzon {
 }
 
 export function crearCorreosMock(o: OpcionesCorreosMock = {}): CorreosService {
-  const correos: DetalleCorreoBuzon[] = structuredClone(o.iniciales ?? CORREOS_DEMO);
+  const correos: DetalleCorreoBuzon[] = o.estado ? o.estado.correos : structuredClone(o.iniciales ?? CORREOS_DEMO);
 
   return {
     async listar(filtro = {}, signal) {

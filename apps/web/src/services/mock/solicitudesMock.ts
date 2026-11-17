@@ -10,6 +10,7 @@ import {
 } from '../contratos';
 import type { Rol, Sesion } from '@/types/conjunto';
 import { SOLICITUDES_DEMO, USUARIOS_CONJUNTO_DEMO } from './datos';
+import type { EstadoPanelMock } from './estadoCompartido';
 import { getSesionMock } from './sesionMockEstado';
 import type { OpcionesMock } from './tipos';
 import { esperar, fallaRedApi } from './util';
@@ -24,6 +25,7 @@ export interface OpcionesSolicitudesMock extends OpcionesMock {
   iniciales?: DetalleSolicitud[];
   usuarios?: UsuarioConjunto[];
   actor?: ActorSolicitudesMock | (() => ActorSolicitudesMock);
+  estado?: EstadoPanelMock;
 }
 
 const ESTADOS_VALIDOS = new Set<EstadoSolicitud>(['NUEVA', 'ASIGNADA', 'EN_PROCESO', 'RESUELTA', 'CERRADA']);
@@ -120,13 +122,32 @@ function validarIdPositivo(valor: unknown, nombre: string): number {
 }
 
 export function crearSolicitudesMock(o: OpcionesSolicitudesMock = {}): SolicitudesService {
-  const lista: DetalleSolicitud[] = structuredClone(o.iniciales ?? SOLICITUDES_DEMO).map((s) => ({
-    ...s,
-    destinos: destinosDesde(s.estado),
-  }));
+  const correosCompartidos = o.estado?.correos;
+  const lista: DetalleSolicitud[] = o.estado
+    ? o.estado.solicitudes
+    : structuredClone(o.iniciales ?? SOLICITUDES_DEMO).map((s) => ({
+        ...s,
+        destinos: destinosDesde(s.estado),
+      }));
+  if (o.estado) {
+    for (const s of lista) {
+      s.destinos = destinosDesde(s.estado);
+    }
+  }
   const usuarios: UsuarioConjunto[] = structuredClone(o.usuarios ?? USUARIOS_CONJUNTO_DEMO);
   const ahora = o.ahora ?? Date.now;
   let siguienteAsignacion = 100;
+
+  function sincronizarCorreo(sol: DetalleSolicitud) {
+    if (!correosCompartidos) return;
+    for (const c of correosCompartidos) {
+      if (c.idSolicitud === sol.id) {
+        c.estado = sol.estado;
+        c.categoria = sol.categoria;
+        c.prioridad = sol.prioridad;
+      }
+    }
+  }
 
   function buscarSolicitud(id: number): DetalleSolicitud {
     validarIdPositivo(id, 'idSolicitud');
@@ -263,6 +284,7 @@ export function crearSolicitudesMock(o: OpcionesSolicitudesMock = {}): Solicitud
         fecha: ahoraIso,
       });
       sol.version += 1;
+      sincronizarCorreo(sol);
 
       return {
         sinCambios: false,
@@ -323,6 +345,7 @@ export function crearSolicitudesMock(o: OpcionesSolicitudesMock = {}): Solicitud
         comentario: entrada.comentario ?? null,
         fecha: ahoraIso,
       });
+      sincronizarCorreo(sol);
 
       return { idSolicitud: sol.id, estado: sol.estado, version: sol.version };
     },
@@ -377,6 +400,7 @@ export function crearSolicitudesMock(o: OpcionesSolicitudesMock = {}): Solicitud
         comentario: `Reclasificada: ${cambios.join('; ')}${entrada.comentario ? `. ${entrada.comentario}` : ''}`,
         fecha: new Date(ahora()).toISOString(),
       });
+      sincronizarCorreo(sol);
 
       return { idSolicitud: sol.id, categoria, prioridad, version: sol.version, sinCambios: false };
     },
@@ -434,6 +458,7 @@ export function crearSolicitudesMock(o: OpcionesSolicitudesMock = {}): Solicitud
         comentario: `Sugerencia IA aceptada: ${cambios.join('; ')}${entrada.comentario ? `. ${entrada.comentario}` : ''}`,
         fecha: new Date(ahora()).toISOString(),
       });
+      sincronizarCorreo(sol);
 
       return { idSolicitud: sol.id, categoria, prioridad, version: sol.version, sinCambios: false };
     },

@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatearDuracion } from '@/lib/formato';
 import { mensajeDeError } from '@/lib/mensajeDeError';
-import { buzonService, resumenService, usuariosService } from '@/services';
+import { buzonService, residentesService, resumenService, usuariosService } from '@/services';
 import { clave } from '@/services/claves';
 import type { CodigoErrorBuzon } from '@/services/contratos';
 import { useSesion } from '@/store/sesion';
@@ -82,6 +82,12 @@ export default function InicioPage() {
     enabled: !!sesion && esAdmin,
   });
 
+  const consultaResidentes = useQuery({
+    queryKey: conjuntoId ? clave(conjuntoId, 'residentes', { soloActivos: true }) : ['residentes-inactivo'],
+    queryFn: ({ signal }) => residentesService.listar({ soloActivos: true }, signal),
+    enabled: !!sesion && esAdmin,
+  });
+
   if (!sesion) return null;
   const { usuario, conjuntoActivo } = sesion;
   const primerNombre = usuario.nombre.split(/\s+/)[0];
@@ -90,8 +96,7 @@ export default function InicioPage() {
   const identidadLista = Boolean(conjuntoActivo.logoUrl?.trim() || conjuntoActivo.paleta);
   const personalListo =
     esAdmin && (consultaUsuarios.data?.filter((u) => u.activo && u.cuentaActiva).length ?? 0) > 1;
-  // Residentes llega en la Ola 2: queda pendiente sin simularse.
-  const residentesListo = false;
+  const residentesListo = esAdmin && (consultaResidentes.data?.length ?? 0) > 0;
 
   const pasos: Paso[] = [
     {

@@ -3,11 +3,14 @@ import { ErrorApi } from '../contratos';
 import { CODIGO_DEMO, crearAuthMock } from './authMock';
 import { crearBuzonMock } from './buzonMock';
 import { crearCorreosMock } from './correosMock';
-import { CORREOS_DEMO, SOLICITUDES_DEMO } from './datos';
+import { CORREOS_DEMO, RESIDENTES_DEMO, SOLICITUDES_DEMO } from './datos';
+import { crearEstadoPanelMock } from './estadoCompartido';
+import { crearResidentesMock } from './residentesMock';
 import { crearResumenMock } from './resumenMock';
 import { getSesionMock, setSesionMock } from './sesionMockEstado';
 import { actorDesdeSesionMock, crearSolicitudesMock } from './solicitudesMock';
 import { crearUsuariosMock } from './usuariosMock';
+import { crearValidacionMock } from './validacionMock';
 
 const SIN_LATENCIA = { latenciaMs: [0, 0] as [number, number] };
 
@@ -500,5 +503,181 @@ describe('solicitudesMock', () => {
     } finally {
       setSesionMock(null);
     }
+  });
+});
+
+describe('residentesMock y validacionMock', () => {
+  it('RESIDENTES_DEMO cumple Ley 1581 (@demo.mailflow.test), coherencia con CORREOS_DEMO y sugerencias pendientes ricas', () => {
+    expect(RESIDENTES_DEMO.length).toBeGreaterThanOrEqual(4);
+    for (const r of RESIDENTES_DEMO) {
+      if (r.correo !== null) {
+        expect(r.correo).toMatch(/@demo\.mailflow\.test$/);
+      }
+    }
+    expect(RESIDENTES_DEMO.some((r) => !r.activo)).toBe(true);
+    expect(RESIDENTES_DEMO.some((r) => r.correo === null)).toBe(true);
+
+    // Al menos 1 correo sin residente vinculado
+    expect(CORREOS_DEMO.some((c) => c.idResidente === null)).toBe(true);
+
+    // Coherencia entre CORREOS_DEMO con idResidente y RESIDENTES_DEMO
+    for (const c of CORREOS_DEMO.filter((x) => x.idResidente !== null)) {
+      const res = RESIDENTES_DEMO.find((r) => r.id === c.idResidente);
+      expect(res).toBeDefined();
+      expect(res?.nombre).toBe(c.residente);
+      expect(res?.unidad).toBe(c.unidad);
+    }
+
+    // Al menos 2 solicitudes con sugerencia LISTA cuya clasificación difiere de la actual
+    const pendientes = SOLICITUDES_DEMO.filter(
+      (s) =>
+        s.estado !== 'CERRADA' &&
+        s.sugerencia?.estado === 'LISTA' &&
+        (s.sugerencia.categoria !== s.categoria || s.sugerencia.prioridad !== s.prioridad),
+    );
+    expect(pendientes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('residentesMock: listar filtra por q y soloActivos, ordena por unidad/nombre; crear normaliza, vincula y rechaza 409/422', async () => {
+    const estado = crearEstadoPanelMock();
+    const srv = crearResidentesMock({ ...SIN_LATENCIA, estado });
+
+    const todos = await srv.listar();
+    expect(todos.length).toBe(RESIDENTES_DEMO.length);
+    const activos = await srv.listar({ soloActivos: true });
+    expect(activos.every((r) => r.activo)).toBe(true);
+    expect(activos.length).toBeLessThan(todos.length);
+
+    const porCorreo = await srv.listar({ q: 'elena.vargas' });
+    expect(porCorreo.some((r) => r.nombre === 'Elena Vargas')).toBe(true);
+
+    // Duplicado por correo (insensible a mayúsculas) -> 409
+    await expect(
+      srv.crear({ nombre: 'Dup', unidad: 'T1-999', correo: 'ELENA.VARGAS@DEMO.MAILFLOW.TEST' }),
+    ).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+
+    // Datos inválidos -> 422
+    await expect(srv.crear({ nombre: '', unidad: 'T1-101' })).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+
+    // Crear residente con el correo del correo huérfano #2 (visitante.ext@demo.mailflow.test) vincula automáticamente
+    const nuevo = await srv.crear({
+      nombre: '  Visitante Nuevo ',
+      unidad: ' T3-105 ',
+      correo: ' VISITANTE.EXT@DEMO.MAILFLOW.TEST ',
+      telefono: ' 3009998877 ',
+    });
+    expect(nuevo).toMatchObject({
+      nombre: 'Visitante Nuevo',
+      unidad: 'T3-105',
+      correo: 'visitante.ext@demo.mailflow.test',
+      telefono: '3009998877',
+      activo: true,
+      version: 1,
+      totalSolicitudes: 1,
+    });
+  });
+
+  it('residentesMock: actualizar sube versión, no-op no sube versión, rechaza 409 versión/correo y 404', async () => {
+    const srv = crearResidentesMock(SIN_LATENCIA);
+    const lista = await srv.listar();
+    const elena = lista.find((r) => r.nombre === 'Elena Vargas')!;
+
+    // Sin cambios -> mantiene versión
+    const sinCambios = await srv.actualizar(elena.id, { nombre: elena.nombre, versionEsperada: elena.version });
+    expect(sinCambios.version).toBe(elena.version);
+
+    // Cambio real -> sube versión
+    const editada = await srv.actualizar(elena.id, { unidad: 'T2-401A', versionEsperada: elena.version });
+    expect(editada).toMatchObject({ unidad: 'T2-401A', version: elena.version + 1 });
+
+    // Versión vieja -> 409
+    await expect(srv.actualizar(elena.id, { activo: false, versionEsperada: elena.version })).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+    });
+
+    // Correo de otro residente -> 409
+    const jorge = lista.find((r) => r.nombre === 'Jorge Salazar')!;
+    await expect(
+      srv.actualizar(elena.id, { correo: jorge.correo, versionEsperada: editada.version }),
+    ).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+
+    // Inexistente -> 404
+    await expect(srv.actualizar(999_999, { activo: false, versionEsperada: 1 })).rejects.toMatchObject({
+      estado: 404,
+      tipo: 'NO_ENCONTRADO',
+    });
+  });
+
+  it('residentesMock.vincularCorreo y validacionMock: actualización cruzada en memoria, 422 residente inactivo y 409 duplicado', async () => {
+    const estado = crearEstadoPanelMock();
+    const correosSrv = crearCorreosMock({ ...SIN_LATENCIA, estado });
+    const solicitudesSrv = crearSolicitudesMock({ ...SIN_LATENCIA, estado });
+    const residentesSrv = crearResidentesMock({ ...SIN_LATENCIA, estado });
+    const validacionSrv = crearValidacionMock({ ...SIN_LATENCIA, estado });
+
+    const colaInicial = await validacionSrv.obtener();
+    expect(colaInicial.sugerencias.length).toBeGreaterThanOrEqual(2);
+    expect(colaInicial.remitentesSinResidente.length).toBeGreaterThanOrEqual(2);
+
+    // 1) Aceptar sugerencia IA -> sale de validacion.obtener().sugerencias
+    const sug1 = colaInicial.sugerencias[0];
+    await solicitudesSrv.aceptarSugerencia(sug1.idSolicitud, { versionEsperada: sug1.version });
+    const trasAceptar = await validacionSrv.obtener();
+    expect(trasAceptar.sugerencias.some((s) => s.idSolicitud === sug1.idSolicitud)).toBe(false);
+
+    // 2) Reclasificar otra sugerencia -> sale de validacion.obtener().sugerencias
+    if (trasAceptar.sugerencias.length > 0) {
+      const sug2 = trasAceptar.sugerencias[0];
+      await solicitudesSrv.reclasificar(sug2.idSolicitud, {
+        categoria: sug2.sugerencia.categoria,
+        prioridad: sug2.sugerencia.prioridad,
+        versionEsperada: sug2.version,
+      });
+      const trasReclas = await validacionSrv.obtener();
+      expect(trasReclas.sugerencias.some((s) => s.idSolicitud === sug2.idSolicitud)).toBe(false);
+    }
+
+    // 3) Vincular correo huérfano a residente inactivo -> 422
+    const correoHuerfano = colaInicial.remitentesSinResidente[0];
+    const inactivo = (await residentesSrv.listar()).find((r) => !r.activo)!;
+    await expect(
+      residentesSrv.vincularCorreo(correoHuerfano.id, { idResidente: inactivo.id }),
+    ).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+
+    // 4) Vincular correo huérfano a residente existente activo -> sale de remitentesSinResidente y actualiza correos/residente
+    const elena = (await residentesSrv.listar({ soloActivos: true })).find((r) => r.nombre === 'Elena Vargas')!;
+    const vinculado = await residentesSrv.vincularCorreo(correoHuerfano.id, { idResidente: elena.id });
+    expect(vinculado).toMatchObject({ id: correoHuerfano.id, idResidente: elena.id, residente: 'Elena Vargas' });
+
+    const detalleCorreo = await correosSrv.detalle(correoHuerfano.id);
+    expect(detalleCorreo.idResidente).toBe(elena.id);
+    const elenaDespues = (await residentesSrv.listar()).find((r) => r.id === elena.id)!;
+    expect(elenaDespues.totalSolicitudes).toBe(elena.totalSolicitudes + (correoHuerfano.idSolicitud ? 1 : 0));
+    expect((await validacionSrv.obtener()).remitentesSinResidente.some((c) => c.id === correoHuerfano.id)).toBe(false);
+
+    // Re-vincular idempotentemente mismo idResidente funciona; con otro idResidente o nuevo residente da 409
+    await expect(residentesSrv.vincularCorreo(correoHuerfano.id, { idResidente: elena.id })).resolves.toMatchObject({
+      id: correoHuerfano.id,
+      idResidente: elena.id,
+    });
+    const jorge = (await residentesSrv.listar({ soloActivos: true })).find((r) => r.nombre === 'Jorge Salazar')!;
+    await expect(residentesSrv.vincularCorreo(correoHuerfano.id, { idResidente: jorge.id })).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+    });
+
+    // 5) Vincular segundo correo huérfano creando residente nuevo (y error 409 si se intenta crear otro con correo duplicado)
+    const segundoHuerfano = (await validacionSrv.obtener()).remitentesSinResidente[0];
+    const detCreado = await residentesSrv.vincularCorreo(segundoHuerfano.id, {
+      residente: { nombre: 'Vecino Registrado', unidad: 'T3-404', telefono: '3105556677', usarCorreoRemitente: true },
+    });
+    expect(detCreado).toMatchObject({ id: segundoHuerfano.id, residente: 'Vecino Registrado', unidad: 'T3-404' });
+    expect((await validacionSrv.obtener()).remitentesSinResidente.some((c) => c.id === segundoHuerfano.id)).toBe(false);
+
+    // Crear un residente con ese mismo correo ya existente -> 409
+    await expect(
+      residentesSrv.crear({ nombre: 'Otro', unidad: 'T1-101', correo: segundoHuerfano.remitente }),
+    ).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
   });
 });

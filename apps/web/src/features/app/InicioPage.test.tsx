@@ -3,13 +3,20 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ErrorApi, type EstadoGateway, type ResumenConjunto, type UsuarioConjunto } from '@/services/contratos';
+import {
+  ErrorApi,
+  type EstadoGateway,
+  type ResidenteConjunto,
+  type ResumenConjunto,
+  type UsuarioConjunto,
+} from '@/services/contratos';
 import type { Conjunto, Rol, Sesion } from '@/types/conjunto';
 import { PALETA_PARQUES } from '@/tema/paletas';
 
 const obtenerResumen = vi.fn();
 const obtenerEstadoBuzon = vi.fn();
 const listarUsuarios = vi.fn();
+const listarResidentes = vi.fn();
 
 vi.mock('@/services', () => ({
   conjuntosService: { listar: vi.fn().mockResolvedValue([]) },
@@ -20,6 +27,12 @@ vi.mock('@/services', () => ({
     listar: (f?: unknown, s?: AbortSignal) => listarUsuarios(f, s),
     agregar: vi.fn(),
     actualizar: vi.fn(),
+  },
+  residentesService: {
+    listar: (f?: unknown, s?: AbortSignal) => listarResidentes(f, s),
+    crear: vi.fn(),
+    actualizar: vi.fn(),
+    vincularCorreo: vi.fn(),
   },
 }));
 
@@ -90,6 +103,19 @@ const dosUsuarios: UsuarioConjunto[] = [
   { id: 2, nombre: 'Camila Torres', correo: 'camila@demo.mailflow.test', rol: 'SOPORTE', activo: true, version: 1, cuentaActiva: true },
 ];
 
+const unResidente: ResidenteConjunto[] = [
+  {
+    id: 101,
+    nombre: 'Elena Vargas',
+    unidad: 'T2-401',
+    correo: 'elena.vargas@demo.mailflow.test',
+    telefono: '3004567890',
+    activo: true,
+    version: 1,
+    totalSolicitudes: 1,
+  },
+];
+
 function ponerSesion(rol: Rol, activo: Conjunto = conjuntoSinIdentidad) {
   const sesion: Sesion = {
     usuario: { id: '1', nombre: 'Ana Pérez', correo: 'ana@demo.mailflow.test', rol },
@@ -117,9 +143,11 @@ beforeEach(() => {
   obtenerResumen.mockReset();
   obtenerEstadoBuzon.mockReset();
   listarUsuarios.mockReset();
+  listarResidentes.mockReset();
   obtenerResumen.mockResolvedValue(resumenConDatos);
   obtenerEstadoBuzon.mockResolvedValue(gatewayDesconectado);
   listarUsuarios.mockResolvedValue(unUsuario);
+  listarResidentes.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -164,19 +192,37 @@ describe('InicioPage · Primeros pasos', () => {
     expect(within(listaPasos[3]).getByRole('link', { name: /cargar residentes/i })).toBeInTheDocument();
   });
 
+  it('ADMIN marca el paso 4 (Cargar los residentes) como completado cuando hay residentes activos', async () => {
+    obtenerEstadoBuzon.mockResolvedValue(gatewayConectado());
+    listarUsuarios.mockResolvedValue(dosUsuarios);
+    listarResidentes.mockResolvedValue(unResidente);
+    ponerSesion('ADMIN', conjuntoConPaleta);
+    montar();
+
+    expect(await screen.findByText('4 de 4 completados')).toBeInTheDocument();
+    expect(listarResidentes).toHaveBeenCalledWith({ soloActivos: true }, expect.any(AbortSignal));
+
+    const pasos = screen.getByRole('region', { name: /primeros pasos/i });
+    const listaPasos = within(pasos).getAllByRole('listitem');
+    expect(within(listaPasos[3]).getByRole('img', { name: 'Completado' })).toBeInTheDocument();
+    expect(within(listaPasos[3]).getByRole('link', { name: /ver/i })).toHaveAttribute('href', '/app/parques/residentes');
+  });
+
   it('marca identidad hecha cuando el conjunto tiene logoUrl aunque no tenga paleta', async () => {
     ponerSesion('ADMIN', conjuntoConLogo);
     montar();
     expect(await screen.findByText('1 de 4 completados')).toBeInTheDocument();
   });
 
-  it('SOPORTE no llama a usuariosService.listar y solo ve hechos los pasos que puede conocer', async () => {
+  it('SOPORTE no llama a usuariosService.listar ni a residentesService.listar y solo ve hechos los pasos que puede conocer', async () => {
     obtenerEstadoBuzon.mockResolvedValue(gatewayConectado('AUTENTICACION'));
+    listarResidentes.mockResolvedValue(unResidente);
     ponerSesion('SOPORTE', conjuntoConPaleta);
     montar();
 
     expect(await screen.findByText('2 de 4 completados')).toBeInTheDocument();
     expect(listarUsuarios).not.toHaveBeenCalled();
+    expect(listarResidentes).not.toHaveBeenCalled();
 
     const pasos = screen.getByRole('region', { name: /primeros pasos/i });
     const listaPasos = within(pasos).getAllByRole('listitem');

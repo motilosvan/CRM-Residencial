@@ -397,3 +397,89 @@ export interface SolicitudesService {
   /** POST /solicitudes/:id/aceptar-sugerencia */
   aceptarSugerencia(id: number, entrada: EntradaAceptarSugerenciaSolicitud): Promise<ResultadoReclasificacion>;
 }
+
+/* ---------- Residentes y cola de validación (Ola 2) ---------- */
+
+export interface ResidenteConjunto {
+  id: number;
+  nombre: string;
+  unidad: string;
+  correo: string | null;
+  telefono: string | null;
+  activo: boolean;
+  version: number;
+  totalSolicitudes: number;
+}
+
+export interface FiltroResidentes {
+  q?: string;
+  soloActivos?: boolean;
+}
+
+export interface EntradaResidente {
+  nombre: string;
+  unidad: string;
+  correo?: string | null;
+  telefono?: string | null;
+}
+
+export interface CambioResidente {
+  nombre?: string;
+  unidad?: string;
+  correo?: string | null;
+  telefono?: string | null;
+  activo?: boolean;
+  versionEsperada: number;
+}
+
+export interface EntradaVincularCorreo {
+  idResidente?: number;
+  residente?: {
+    nombre: string;
+    unidad: string;
+    telefono?: string | null;
+    usarCorreoRemitente?: boolean;
+  };
+}
+
+export interface ResidentesService {
+  /** GET /residentes */
+  listar(filtro?: FiltroResidentes, signal?: AbortSignal): Promise<ResidenteConjunto[]>;
+  /** POST /residentes */
+  crear(entrada: EntradaResidente): Promise<ResidenteConjunto>;
+  /** PATCH /residentes/:id */
+  actualizar(id: number, cambio: CambioResidente): Promise<ResidenteConjunto>;
+  /** POST /correos/:id/vincular-residente */
+  vincularCorreo(idCorreo: number, entrada: EntradaVincularCorreo): Promise<DetalleCorreoBuzon>;
+}
+
+export interface SugerenciaPendienteValidacion {
+  idSolicitud: number;
+  codigo: string;
+  asunto: string | null;
+  remitente: string;
+  fechaCreacion: string;
+  estado: EstadoSolicitud;
+  categoriaActual: CategoriaSolicitud;
+  prioridadActual: PrioridadSolicitud;
+  version: number;
+  sugerencia: {
+    categoria: CategoriaSolicitud;
+    prioridad: PrioridadSolicitud;
+    resumen: string;
+    justificacion: string | null;
+    proveedor: string;
+    modelo: string;
+    fechaActualizacion: string;
+  };
+}
+
+export interface ColaValidacion {
+  sugerencias: SugerenciaPendienteValidacion[];
+  remitentesSinResidente: FilaCorreoBuzon[];
+}
+
+export interface ValidacionService {
+  /** GET /validacion */
+  obtener(signal?: AbortSignal): Promise<ColaValidacion>;
+}

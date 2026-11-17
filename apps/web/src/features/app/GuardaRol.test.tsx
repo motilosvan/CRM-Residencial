@@ -30,6 +30,15 @@ vi.mock('@/services', () => ({
     agregar: vi.fn(),
     actualizar: vi.fn(),
   },
+  residentesService: {
+    listar: () => Promise.resolve([]),
+    crear: vi.fn(),
+    actualizar: vi.fn(),
+    vincularCorreo: vi.fn(),
+  },
+  validacionService: {
+    obtener: () => Promise.resolve({ sugerencias: [], remitentesSinResidente: [] }),
+  },
 }));
 
 import { rutas } from '@/router';
@@ -100,5 +109,53 @@ describe('GuardaRol', () => {
       </QueryClientProvider>,
     );
     expect(await screen.findByRole('button', { name: /agregar usuario/i })).toBeInTheDocument();
+  });
+
+  it('SOPORTE entrando por URL a /app/:conjunto/validacion o /residentes ve 403 y ADMIN accede a ambas', async () => {
+    ponerSesion('SOPORTE');
+    const qc1 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r1 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/validacion'] });
+    render(
+      <QueryClientProvider client={qc1}>
+        <RouterProvider router={r1} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+
+    cleanup();
+
+    ponerSesion('SOPORTE');
+    const qc2 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r2 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/residentes'] });
+    render(
+      <QueryClientProvider client={qc2}>
+        <RouterProvider router={r2} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: /sin acceso/i })).toBeInTheDocument();
+
+    cleanup();
+
+    ponerSesion('ADMIN');
+    const qc3 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r3 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/validacion'] });
+    render(
+      <QueryClientProvider client={qc3}>
+        <RouterProvider router={r3} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: /cola de validación/i })).toBeInTheDocument();
+
+    cleanup();
+
+    ponerSesion('ADMIN');
+    const qc4 = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const r4 = createMemoryRouter(rutas, { initialEntries: ['/app/uno/residentes'] });
+    render(
+      <QueryClientProvider client={qc4}>
+        <RouterProvider router={r4} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('button', { name: /registrar residente/i })).toBeInTheDocument();
   });
 });
