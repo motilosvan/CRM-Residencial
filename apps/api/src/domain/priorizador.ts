@@ -1,4 +1,4 @@
-import { normalizar, type Categoria } from './clasificador.js';
+import { normalizar, palabrasDePatrones, type Categoria } from './clasificador.js';
 
 export const PRIORIDADES = ['ALTA', 'MEDIA', 'BAJA'] as const;
 export type Prioridad = (typeof PRIORIDADES)[number];
@@ -6,13 +6,16 @@ export type Prioridad = (typeof PRIORIDADES)[number];
 const PESO: Record<Prioridad, number> = { ALTA: 3, MEDIA: 2, BAJA: 1 };
 
 /** Prioridad base por categoría. */
-const BASE: Record<Categoria, Prioridad> = {
+const BASE: Record<Categoria, Prioridad> = Object.freeze({
   SEGURIDAD: 'ALTA',
   MANTENIMIENTO: 'MEDIA',
   FACTURACION: 'BAJA',
   ADMINISTRATIVO: 'BAJA',
   SIN_CLASIFICAR: 'MEDIA',
-};
+});
+
+/** Prioridad base por categoría derivada del motor de reglas. */
+export const PRIORIDAD_BASE_POR_CATEGORIA: Readonly<Record<Categoria, Prioridad>> = BASE;
 
 /** Señales de urgencia que elevan a ALTA sin importar la categoría. */
 const URGENTES: RegExp[] = [
@@ -20,6 +23,9 @@ const URGENTES: RegExp[] = [
   /\bescape de gas/, /\bcortocircuito/, /\brobo\b/, /\brobaron/, /\bagresi/, /\bamenaza/, /\batrapad/,
   /\bascensor (atascado|detenido|trabado)/, /\bsin agua\b/, /\bsin luz\b/, /\bheri/, /\bdisparo/,
 ];
+
+/** Palabras clave de urgencia derivadas de `URGENTES` sin duplicar la lista. */
+export const PALABRAS_CLAVE_URGENCIA: readonly string[] = palabrasDePatrones(URGENTES);
 
 /**
  * Ajusta una prioridad que no calculó este módulo (p. ej. la sugerida por una IA) a la regla del negocio:

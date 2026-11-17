@@ -58,6 +58,36 @@ function contar(texto: string, patrones: RegExp[]): number {
   return patrones.reduce((n, p) => n + (texto.match(new RegExp(p.source, 'g'))?.length ?? 0), 0);
 }
 
+/** Convierte patrones RegExp en palabras/raíces legibles sin marcas de frontera `\b`. */
+export function palabrasDePatrones(patrones: readonly RegExp[]): readonly string[] {
+  return Object.freeze(patrones.map((p) => p.source.replace(/\\b/g, '')));
+}
+
+/** Reglas del clasificador en orden de desempate, derivadas de `REGLAS` sin duplicar listas. */
+export const REGLAS_CATEGORIA: ReadonlyArray<{
+  categoria: Exclude<Categoria, 'SIN_CLASIFICAR'>;
+  palabrasClave: readonly string[];
+}> = Object.freeze(
+  REGLAS.map((r) =>
+    Object.freeze({
+      categoria: r.categoria,
+      palabrasClave: palabrasDePatrones(r.patrones),
+    }),
+  ),
+);
+
+const mapaPalabras: Record<Categoria, readonly string[]> = {
+  SEGURIDAD: [],
+  MANTENIMIENTO: [],
+  FACTURACION: [],
+  ADMINISTRATIVO: [],
+  SIN_CLASIFICAR: Object.freeze([]),
+};
+for (const regla of REGLAS_CATEGORIA) mapaPalabras[regla.categoria] = regla.palabrasClave;
+
+/** Palabras clave del clasificador indexadas por categoría. */
+export const PALABRAS_CLAVE_POR_CATEGORIA: Readonly<Record<Categoria, readonly string[]>> = Object.freeze(mapaPalabras);
+
 /**
  * Clasifica por palabras clave. El asunto pesa el doble. Sin coincidencias → SIN_CLASIFICAR
  * (un humano lo reclasifica con T4: ningún correo se descarta).

@@ -176,7 +176,7 @@ export async function ingestarCorreo(
           `INSERT INTO CORREOS (idConjunto, idResidente, remitente, asunto, cuerpo, fechaRecepcion, messageId, imapUid)
            OUTPUT inserted.idCorreo, inserted.idResidente
            VALUES (@idConjunto,
-                   (SELECT idResidente FROM RESIDENTES WHERE idConjunto = @idConjunto AND correo = @remitente),
+                   (SELECT idResidente FROM RESIDENTES WHERE idConjunto = @idConjunto AND correo = @remitente AND activo = 1),
                    @remitente, @asunto, @cuerpo, @recibidoEn, @messageId, @imapUid)`,
         );
     } catch (err) {

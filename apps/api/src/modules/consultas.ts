@@ -1,9 +1,14 @@
 import sql from 'mssql';
 import { z } from 'zod';
-import { CATEGORIAS } from '../domain/clasificador.js';
+import { CATEGORIAS, PALABRAS_CLAVE_POR_CATEGORIA, type Categoria } from '../domain/clasificador.js';
 import { enmascarar } from '../domain/enmascarar.js';
 import { destinosDesde, ESTADOS, type Estado } from '../domain/estados.js';
-import { PRIORIDADES } from '../domain/priorizador.js';
+import {
+  PALABRAS_CLAVE_URGENCIA,
+  PRIORIDAD_BASE_POR_CATEGORIA,
+  PRIORIDADES,
+  type Prioridad,
+} from '../domain/priorizador.js';
 import { withTx } from '../db/withTx.js';
 import { Forbidden, NotFound } from '../errors.js';
 import { validar, type Actor, type Rol } from './solicitudes.js';
@@ -232,7 +237,7 @@ export const FiltroCorreosSchema = z.object({
 export type FiltroCorreos = z.input<typeof FiltroCorreosSchema>;
 
 /** `%`, `_` y `[` son comodines de LIKE: se escapan para que el texto se busque literal. */
-function patronLike(q: string | undefined): string | null {
+export function patronLike(q: string | undefined): string | null {
   return q ? `%${q.replace(/[\\%_[]/g, (m) => `\\${m}`)}%` : null;
 }
 
@@ -753,4 +758,242 @@ export function reporteACsv(r: ReporteSolicitudes): string {
     filas.push(['carga_abiertas', u.nombre, u.abiertas, '', '', ''].map(esc).join(','));
   }
   return filas.join('\r\n') + '\r\n';
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Ola 2 (F3): Cola de validación y catálogos del dominio + BD.
+ * ------------------------------------------------------------------------------------------- */
+
+export interface SugerenciaPendienteValidacion {
+  idSolicitud: number;
+  codigo: string;
+  asunto: string | null;
+  remitente: string;
+  fechaCreacion: Date;
+  estado: Estado;
+  categoriaActual: Categoria;
+  prioridadActual: Prioridad;
+  version: number;
+  sugerencia: {
+    categoria: Categoria;
+    prioridad: Prioridad;
+    resumen: string;
+    justificacion: string | null;
+    proveedor: string;
+    modelo: string;
+    fechaActualizacion: Date;
+  };
+}
+
+export interface ColaValidacion {
+  sugerencias: SugerenciaPendienteValidacion[];
+  remitentesSinResidente: (FilaCorreo & { extracto: string })[];
+}
+
+interface FilaSugerenciaPendienteRaw {
+  idSolicitud: number;
+  codigo: string;
+  asunto: string | null;
+  remitente: string;
+  fechaCreacion: Date;
+  estado: Estado;
+  categoriaActual: Categoria;
+  prioridadActual: Prioridad;
+  version: number;
+  sugCategoria: Categoria;
+  sugPrioridad: Prioridad;
+  sugResumen: string;
+  sugJustificacion: string | null;
+  sugProveedor: string;
+  sugModelo: string;
+  sugFechaActualizacion: Date;
+}
+
+/**
+ * Cola de validación del conjunto en SNAPSHOT:
+ * 1) Solicitudes no cerradas con sugerencia IA `LISTA` que difiere en categoría o prioridad y sin decisión
+ *    humana posterior (reclasificación manual o aceptación de sugerencia).
+ * 2) Correos del conjunto sin residente vinculado (`idResidente IS NULL`), más recientes primero.
+ */
+export async function colaValidacion(pool: sql.ConnectionPool, idConjunto: number): Promise<ColaValidacion> {
+  const conj = validar(IdConjuntoSchema, idConjunto);
+  return withTx(
+    pool,
+    async (tx) => {
+      const sugRaw = (
+        await tx
+          .request()
+          .input('idConjunto', sql.Int, conj)
+          .query<FilaSugerenciaPendienteRaw>(
+            `SELECT s.idSolicitud,
+                    'SOL-' + RIGHT('000000' + CAST(s.idSolicitud AS VARCHAR(10)), 6) AS codigo,
+                    c.asunto,
+                    c.remitente,
+                    s.fechaCreacion,
+                    e.nombre AS estado,
+                    cat.nombre AS categoriaActual,
+                    p.nombre AS prioridadActual,
+                    s.version,
+                    catSug.nombre AS sugCategoria,
+                    pSug.nombre AS sugPrioridad,
+                    g.resumen AS sugResumen,
+                    g.justificacion AS sugJustificacion,
+                    g.proveedor AS sugProveedor,
+                    g.modelo AS sugModelo,
+                    g.fechaActualizacion AS sugFechaActualizacion
+               FROM dbo.SOLICITUDES s
+               JOIN dbo.CORREOS c ON c.idCorreo = s.idCorreo
+               JOIN dbo.ESTADOS e ON e.idEstado = s.idEstado
+               JOIN dbo.CATEGORIAS cat ON cat.idCategoria = s.idCategoria
+               JOIN dbo.PRIORIDADES p ON p.idPrioridad = s.idPrioridad
+               JOIN dbo.SUGERENCIAS_IA g ON g.idSolicitud = s.idSolicitud
+               JOIN dbo.CATEGORIAS catSug ON catSug.idCategoria = g.idCategoria
+               JOIN dbo.PRIORIDADES pSug ON pSug.idPrioridad = g.idPrioridad
+              WHERE c.idConjunto = @idConjunto
+                AND e.nombre <> 'CERRADA'
+                AND g.estado = 'LISTA'
+                AND (s.idCategoria <> g.idCategoria OR s.idPrioridad <> g.idPrioridad)
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM dbo.HISTORIAL_ESTADOS h
+                   WHERE h.idSolicitud = s.idSolicitud
+                     AND h.idUsuario IS NOT NULL
+                     AND h.idEstadoAnterior = h.idEstadoNuevo
+                     AND h.fecha >= g.fechaActualizacion
+                     AND (h.comentario LIKE N'Reclasificada:%' OR h.comentario LIKE N'Sugerencia IA aceptada:%')
+                )
+              ORDER BY p.peso DESC, s.fechaCreacion DESC, s.idSolicitud DESC`,
+          )
+      ).recordset;
+
+      const sugerencias: SugerenciaPendienteValidacion[] = sugRaw.map((f) => ({
+        idSolicitud: f.idSolicitud,
+        codigo: f.codigo,
+        asunto: f.asunto,
+        remitente: f.remitente,
+        fechaCreacion: f.fechaCreacion,
+        estado: f.estado,
+        categoriaActual: f.categoriaActual,
+        prioridadActual: f.prioridadActual,
+        version: f.version,
+        sugerencia: {
+          categoria: f.sugCategoria,
+          prioridad: f.sugPrioridad,
+          resumen: f.sugResumen,
+          justificacion: f.sugJustificacion,
+          proveedor: f.sugProveedor,
+          modelo: f.sugModelo,
+          fechaActualizacion: f.sugFechaActualizacion,
+        },
+      }));
+
+      const remitentesSinResidente = (
+        await tx
+          .request()
+          .input('idConjunto', sql.Int, conj)
+          .query<FilaCorreo & { extracto: string }>(
+            `${BUZON}, LEFT(COALESCE(c.cuerpo, N''), 200) AS extracto ${BUZON_FROM}
+              WHERE c.idConjunto = @idConjunto AND c.idResidente IS NULL
+              ORDER BY c.fechaRecepcion DESC, c.idCorreo DESC`,
+          )
+      ).recordset;
+
+      return { sugerencias, remitentesSinResidente };
+    },
+    { isolation: 'SNAPSHOT' },
+  );
+}
+
+export interface CatalogoCategoria {
+  id: number;
+  nombre: Categoria;
+  prioridadBase: Prioridad;
+  palabrasClave: readonly string[];
+}
+
+export interface CatalogoPrioridad {
+  id: number;
+  nombre: Prioridad;
+  peso: number;
+  slaHoras: number;
+}
+
+export interface CatalogoEstado {
+  id: number;
+  nombre: Estado;
+  esFinal: boolean;
+}
+
+export interface CatalogoTransicion {
+  origen: Estado;
+  destino: Estado;
+}
+
+export interface CatalogosDominio {
+  categorias: CatalogoCategoria[];
+  prioridades: CatalogoPrioridad[];
+  palabrasClaveUrgencia: string[];
+  estados: CatalogoEstado[];
+  transiciones: CatalogoTransicion[];
+}
+
+/** Catálogos oficiales leídos desde la BD en SNAPSHOT combinados con los metadatos puros de `domain/`. */
+export async function obtenerCatalogos(pool: sql.ConnectionPool): Promise<CatalogosDominio> {
+  return withTx(
+    pool,
+    async (tx) => {
+      const catRows = (
+        await tx
+          .request()
+          .query<{ id: number; nombre: Categoria }>('SELECT idCategoria AS id, nombre FROM dbo.CATEGORIAS ORDER BY idCategoria')
+      ).recordset;
+
+      const ordenCategoria = (c: Categoria) => {
+        const idx = CATEGORIAS.indexOf(c);
+        return idx === -1 ? CATEGORIAS.length : idx;
+      };
+
+      const categorias: CatalogoCategoria[] = [...catRows]
+        .sort((a, b) => ordenCategoria(a.nombre) - ordenCategoria(b.nombre))
+        .map((c) => ({
+          id: c.id,
+          nombre: c.nombre,
+          prioridadBase: PRIORIDAD_BASE_POR_CATEGORIA[c.nombre] ?? 'MEDIA',
+          palabrasClave: [...(PALABRAS_CLAVE_POR_CATEGORIA[c.nombre] ?? [])],
+        }));
+
+      const prioridades = (
+        await tx
+          .request()
+          .query<CatalogoPrioridad>('SELECT idPrioridad AS id, nombre, peso, slaHoras FROM dbo.PRIORIDADES ORDER BY peso DESC')
+      ).recordset;
+
+      const estados = (
+        await tx
+          .request()
+          .query<CatalogoEstado>('SELECT idEstado AS id, nombre, esFinal FROM dbo.ESTADOS ORDER BY idEstado')
+      ).recordset;
+
+      const transiciones = (
+        await tx
+          .request()
+          .query<CatalogoTransicion>(
+            `SELECT o.nombre AS origen, d.nombre AS destino
+               FROM dbo.TRANSICIONES_ESTADO t
+               JOIN dbo.ESTADOS o ON o.idEstado = t.idEstadoOrigen
+               JOIN dbo.ESTADOS d ON d.idEstado = t.idEstadoDestino
+              ORDER BY t.idEstadoOrigen, t.idEstadoDestino`,
+          )
+      ).recordset;
+
+      return {
+        categorias,
+        prioridades,
+        palabrasClaveUrgencia: [...PALABRAS_CLAVE_URGENCIA],
+        estados,
+        transiciones,
+      };
+    },
+    { isolation: 'SNAPSHOT' },
+  );
 }

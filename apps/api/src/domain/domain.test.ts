@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { clasificar, normalizar } from './clasificador.js';
+import {
+  CATEGORIAS,
+  clasificar,
+  normalizar,
+  PALABRAS_CLAVE_POR_CATEGORIA,
+  REGLAS_CATEGORIA,
+} from './clasificador.js';
 import { CORREOS_EJEMPLO } from '../../test/fixtures/correos.js';
 import { destinosDesde, ESTADOS, puedeTransicionar } from './estados.js';
-import { priorizar } from './priorizador.js';
+import {
+  PALABRAS_CLAVE_URGENCIA,
+  PRIORIDAD_BASE_POR_CATEGORIA,
+  PRIORIDADES,
+  priorizar,
+} from './priorizador.js';
 
 describe('normalizar', () => {
   it('quita tildes y pasa a minúsculas', () => {
@@ -87,5 +98,49 @@ describe('máquina de estados', () => {
   it('CERRADA es final y ningún estado transiciona a sí mismo', () => {
     expect(destinosDesde('CERRADA')).toEqual([]);
     for (const e of ESTADOS) expect(puedeTransicionar(e, e)).toBe(false);
+  });
+});
+
+describe('metadatos puros de dominio (catálogos)', () => {
+  it('expone reglas y palabras clave derivadas de REGLAS para cada categoría sin bordes \\b', () => {
+    expect(REGLAS_CATEGORIA.map((r) => r.categoria)).toEqual([
+      'SEGURIDAD',
+      'MANTENIMIENTO',
+      'FACTURACION',
+      'ADMINISTRATIVO',
+    ]);
+    for (const cat of CATEGORIAS) {
+      const palabras = PALABRAS_CLAVE_POR_CATEGORIA[cat];
+      expect(Array.isArray(palabras)).toBe(true);
+      if (cat === 'SIN_CLASIFICAR') {
+        expect(palabras).toEqual([]);
+      } else {
+        expect(palabras.length).toBeGreaterThan(0);
+        for (const p of palabras) expect(p).not.toContain('\\b');
+      }
+    }
+    expect(PALABRAS_CLAVE_POR_CATEGORIA.SEGURIDAD).toContain('robo');
+    expect(PALABRAS_CLAVE_POR_CATEGORIA.MANTENIMIENTO).toContain('fuga');
+    expect(PALABRAS_CLAVE_POR_CATEGORIA.FACTURACION).toContain('factura');
+    expect(PALABRAS_CLAVE_POR_CATEGORIA.ADMINISTRATIVO).toContain('asamblea');
+  });
+
+  it('expone prioridad base por categoría y palabras clave de urgencia coherentes con priorizar', () => {
+    for (const cat of CATEGORIAS) {
+      const base = PRIORIDAD_BASE_POR_CATEGORIA[cat];
+      expect(PRIORIDADES).toContain(base);
+      expect(priorizar(cat, 'hola', 'buenos dias')).toBe(base);
+    }
+    expect(PRIORIDAD_BASE_POR_CATEGORIA).toEqual({
+      SEGURIDAD: 'ALTA',
+      MANTENIMIENTO: 'MEDIA',
+      FACTURACION: 'BAJA',
+      ADMINISTRATIVO: 'BAJA',
+      SIN_CLASIFICAR: 'MEDIA',
+    });
+    expect(PALABRAS_CLAVE_URGENCIA.length).toBeGreaterThan(0);
+    for (const p of PALABRAS_CLAVE_URGENCIA) expect(p).not.toContain('\\b');
+    expect(PALABRAS_CLAVE_URGENCIA).toContain('urgente');
+    expect(PALABRAS_CLAVE_URGENCIA).toContain('fuga de gas');
   });
 });

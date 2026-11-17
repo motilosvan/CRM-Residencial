@@ -5,8 +5,9 @@ import { ConflictError, ErrorAcceso, Forbidden, NotFound, TransicionInvalida, Va
 import { solicitarCodigo, verificarCodigo, type DepsAcceso } from '../modules/acceso.js';
 import { asignar } from '../modules/asignaciones.js';
 import { desconectarBuzon, guardarBuzon, sincronizarConjunto, type DepsBuzon } from '../modules/buzones.js';
-import { listarConjuntos } from '../modules/conjuntos.js';
+import { actualizarIdentidadConjunto, listarConjuntos, obtenerIdentidadConjunto } from '../modules/conjuntos.js';
 import {
+  colaValidacion,
   detalleCorreo,
   detalleSolicitud,
   estadoGateway,
@@ -14,9 +15,16 @@ import {
   listarCorreos,
   listarSolicitudes,
   listarUsuariosConjunto,
+  obtenerCatalogos,
   reporteACsv,
   resumen,
 } from '../modules/consultas.js';
+import {
+  actualizarResidenteConjunto,
+  crearResidenteConjunto,
+  listarResidentesConjunto,
+  vincularCorreoResidente,
+} from '../modules/residentes.js';
 import { cambiarConjuntoActivo, crearSesion, leerSesion, revocarSesion, type SesionActiva, type SesionPublica } from '../modules/sesiones.js';
 import { cambiarEstado, reclasificar, type Actor } from '../modules/solicitudes.js';
 import { aceptarSugerencia } from '../modules/sugerencias.js';
@@ -85,6 +93,20 @@ function numero(v: unknown): number | undefined {
 
 const texto = (v: unknown): string | undefined => (v === '' ? undefined : (v as string | undefined));
 
+function booleanoOpcional(v: unknown): boolean | undefined {
+  if (v === undefined || v === '') return undefined;
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return v as boolean;
+}
+
+function conVersion(body: unknown): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body ?? {};
+  const b = body as Record<string, unknown>;
+  const v = versionDe(b);
+  return v === undefined ? b : { ...b, versionEsperada: v };
+}
+
 const actorDe = (s: SesionActiva): Actor => ({
   idUsuario: s.idUsuario,
   rol: s.usuario.rol,
@@ -129,7 +151,12 @@ export function construirApp({ pool, hostsPermitidos, acceso, buzon, limitePetic
   const exigirSesion = async (req: FastifyRequest) => {
     req.sesion = await leerSesion(pool, req.cookies[COOKIE]);
   };
+  const exigirAdmin = async (req: FastifyRequest) => {
+    await exigirSesion(req);
+    if (req.sesion.usuario.rol !== 'ADMIN') throw new Forbidden('Solo un administrador puede acceder a este recurso');
+  };
   const protegida = { preHandler: exigirSesion };
+  const soloAdmin = { preHandler: exigirAdmin };
 
   app.addHook('onRequest', async (req, reply) => {
     reply.headers(CABECERAS);
@@ -179,6 +206,15 @@ export function construirApp({ pool, hostsPermitidos, acceso, buzon, limitePetic
   });
 
   app.get('/api/correos/:id', protegida, async (req) => detalleCorreo(pool, req.sesion.idConjuntoActivo, Number((req.params as { id: string }).id)));
+
+  app.post('/api/correos/:id/vincular-residente', soloAdmin, async (req) =>
+    vincularCorreoResidente(
+      pool,
+      actorDe(req.sesion),
+      Number((req.params as { id: string }).id),
+      (req.body ?? {}) as never,
+    ),
+  );
 
   app.get('/api/gateway/estado', protegida, async (req) => estadoGateway(pool, req.sesion.idConjuntoActivo));
 
@@ -302,6 +338,38 @@ export function construirApp({ pool, hostsPermitidos, acceso, buzon, limitePetic
       { rol: b.rol as never, activo: b.activo as never, versionEsperada: versionDe(b) as number },
     );
   });
+
+  app.get('/api/residentes', soloAdmin, async (req) => {
+    const q = req.query as Record<string, unknown>;
+    return listarResidentesConjunto(pool, actorDe(req.sesion), {
+      q: texto(q.q),
+      soloActivos: booleanoOpcional(q.soloActivos),
+    });
+  });
+
+  app.post('/api/residentes', soloAdmin, async (req, reply) => {
+    const residente = await crearResidenteConjunto(pool, actorDe(req.sesion), (req.body ?? {}) as never);
+    return reply.code(201).send(residente);
+  });
+
+  app.patch('/api/residentes/:id', soloAdmin, async (req) =>
+    actualizarResidenteConjunto(
+      pool,
+      actorDe(req.sesion),
+      Number((req.params as { id: string }).id),
+      conVersion(req.body) as never,
+    ),
+  );
+
+  app.get('/api/validacion', soloAdmin, async (req) => colaValidacion(pool, req.sesion.idConjuntoActivo));
+
+  app.get('/api/conjunto/identidad', soloAdmin, async (req) => obtenerIdentidadConjunto(pool, actorDe(req.sesion)));
+
+  app.patch('/api/conjunto/identidad', soloAdmin, async (req) =>
+    actualizarIdentidadConjunto(pool, actorDe(req.sesion), conVersion(req.body) as never),
+  );
+
+  app.get('/api/catalogos', soloAdmin, async () => obtenerCatalogos(pool));
 
   app.get('/api/resumen', protegida, async (req) => resumen(pool, req.sesion.idConjuntoActivo));
 
