@@ -199,7 +199,11 @@ export interface SugerenciaGuardada {
   fechaActualizacion: string;
 }
 
-export type EstadoSolicitudCorreo = 'NUEVA' | 'ASIGNADA' | 'EN_PROCESO' | 'RESUELTA' | 'CERRADA';
+export type EstadoSolicitud = 'NUEVA' | 'ASIGNADA' | 'EN_PROCESO' | 'RESUELTA' | 'CERRADA';
+export type CategoriaSolicitud = 'SEGURIDAD' | 'MANTENIMIENTO' | 'FACTURACION' | 'ADMINISTRATIVO' | 'SIN_CLASIFICAR';
+export type PrioridadSolicitud = 'ALTA' | 'MEDIA' | 'BAJA';
+
+export type EstadoSolicitudCorreo = EstadoSolicitud;
 
 export interface FilaCorreo {
   id: number;
@@ -285,4 +289,111 @@ export interface UsuariosService {
   agregar(entrada: NuevoUsuarioConjunto): Promise<UsuarioConjunto>;
   /** PATCH /usuarios/:id */
   actualizar(id: number, cambio: CambioUsuarioConjunto): Promise<UsuarioConjunto>;
+}
+
+/* ---------- Solicitudes del conjunto (T2–T4, T7→T4) ---------- */
+
+export interface FilaSolicitud {
+  id: number;
+  codigo: string;
+  asunto: string | null;
+  remitente: string;
+  estado: EstadoSolicitud;
+  categoria: CategoriaSolicitud;
+  prioridad: PrioridadSolicitud;
+  slaHoras: number;
+  version: number;
+  fechaCreacion: string;
+  primeraRespuesta: string | null;
+  fechaCierre: string | null;
+  responsable: string | null;
+  idResponsable: number | null;
+}
+
+export interface EventoHistorialSolicitud {
+  anterior: EstadoSolicitud | null;
+  nuevo: EstadoSolicitud;
+  usuario: string | null;
+  comentario: string | null;
+  fecha: string;
+}
+
+export interface AsignacionSolicitud {
+  nombre: string;
+  fechaAsignacion: string;
+  liberadaEn: string | null;
+}
+
+export interface DetalleSolicitud extends FilaSolicitud {
+  cuerpo: string;
+  messageId: string;
+  historial: EventoHistorialSolicitud[];
+  asignaciones: AsignacionSolicitud[];
+  destinos: EstadoSolicitud[];
+  sugerencia: SugerenciaGuardada | null;
+}
+
+export interface FiltroSolicitudes {
+  estado?: EstadoSolicitud;
+  categoria?: CategoriaSolicitud;
+  prioridad?: PrioridadSolicitud;
+  idResponsable?: number;
+  limite?: number;
+  desplazamiento?: number;
+}
+
+export interface EntradaAsignacionSolicitud {
+  idResponsable: number;
+  versionEsperada: number;
+}
+
+export type ResultadoAsignacion =
+  | { sinCambios: true; version: number }
+  | { sinCambios: false; version: number; estado: EstadoSolicitud; idAsignacion: number };
+
+export interface EntradaCambioEstadoSolicitud {
+  nuevoEstado: EstadoSolicitud;
+  versionEsperada: number;
+  comentario?: string;
+}
+
+export interface ResultadoCambioEstado {
+  idSolicitud: number;
+  estado: EstadoSolicitud;
+  version: number;
+}
+
+export interface EntradaReclasificacionSolicitud {
+  categoria?: CategoriaSolicitud;
+  prioridad?: PrioridadSolicitud;
+  versionEsperada: number;
+  comentario?: string;
+}
+
+export interface EntradaAceptarSugerenciaSolicitud {
+  versionEsperada: number;
+  comentario?: string;
+}
+
+export interface ResultadoReclasificacion {
+  idSolicitud: number;
+  categoria: CategoriaSolicitud;
+  prioridad: PrioridadSolicitud;
+  version: number;
+  sinCambios: boolean;
+}
+
+export interface SolicitudesService {
+  /** GET /solicitudes */
+  listar(filtro?: FiltroSolicitudes, signal?: AbortSignal): Promise<FilaSolicitud[]>;
+  /** GET /solicitudes/:id */
+  detalle(id: number, signal?: AbortSignal): Promise<DetalleSolicitud>;
+  /** POST /solicitudes/:id/asignar */
+  asignar(id: number, entrada: EntradaAsignacionSolicitud): Promise<ResultadoAsignacion>;
+  /** POST /solicitudes/:id/estado */
+  cambiarEstado(id: number, entrada: EntradaCambioEstadoSolicitud): Promise<ResultadoCambioEstado>;
+  /** POST /solicitudes/:id/reclasificar */
+  reclasificar(id: number, entrada: EntradaReclasificacionSolicitud): Promise<ResultadoReclasificacion>;
+  /** POST /solicitudes/:id/aceptar-sugerencia */
+  aceptarSugerencia(id: number, entrada: EntradaAceptarSugerenciaSolicitud): Promise<ResultadoReclasificacion>;
 }

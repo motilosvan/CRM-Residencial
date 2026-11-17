@@ -1,15 +1,25 @@
-import type { AuthService, BuzonService, ConjuntosService, CorreosService, ResumenService, UsuariosService } from './contratos';
+import type {
+  AuthService,
+  BuzonService,
+  ConjuntosService,
+  CorreosService,
+  ResumenService,
+  SolicitudesService,
+  UsuariosService,
+} from './contratos';
 import { crearAuthHttp } from './http/authHttp';
 import { crearBuzonHttp } from './http/buzonHttp';
 import { crearConjuntosHttp } from './http/conjuntosHttp';
 import { crearCorreosHttp } from './http/correosHttp';
 import { crearResumenHttp } from './http/resumenHttp';
+import { crearSolicitudesHttp } from './http/solicitudesHttp';
 import { crearUsuariosHttp } from './http/usuariosHttp';
 import { crearAuthMock } from './mock/authMock';
 import { crearBuzonMock } from './mock/buzonMock';
 import { crearConjuntosMock } from './mock/conjuntosMock';
 import { crearCorreosMock } from './mock/correosMock';
 import { crearResumenMock } from './mock/resumenMock';
+import { actorDesdeSesionMock, crearSolicitudesMock } from './mock/solicitudesMock';
 import { crearUsuariosMock } from './mock/usuariosMock';
 import type { OpcionesMock } from './mock/tipos';
 
@@ -35,4 +45,7 @@ export const authService: AuthService = usaMock ? crearAuthMock(opciones) : crea
 export const resumenService: ResumenService = usaMock ? crearResumenMock(opciones) : crearResumenHttp();
 export const buzonService: BuzonService = usaMock ? crearBuzonMock(opciones) : crearBuzonHttp();
 export const correosService: CorreosService = usaMock ? crearCorreosMock(opciones) : crearCorreosHttp();
+export const solicitudesService: SolicitudesService = usaMock
+  ? crearSolicitudesMock({ ...opciones, actor: () => actorDesdeSesionMock() })
+  : crearSolicitudesHttp();
 export const usuariosService: UsuariosService = usaMock ? crearUsuariosMock(opciones) : crearUsuariosHttp();

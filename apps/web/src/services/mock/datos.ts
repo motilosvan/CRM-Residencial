@@ -1,4 +1,15 @@
-import type { DetalleCorreoBuzon, EstadoGateway, ResumenConjunto, UsuarioConjunto } from '../contratos';
+import type {
+  AsignacionSolicitud,
+  CategoriaSolicitud,
+  DetalleCorreoBuzon,
+  DetalleSolicitud,
+  EstadoGateway,
+  EstadoSolicitud,
+  EventoHistorialSolicitud,
+  PrioridadSolicitud,
+  ResumenConjunto,
+  UsuarioConjunto,
+} from '../contratos';
 import { PALETA_PARQUES } from '@/tema/paletas';
 import type { Conjunto, Usuario } from '@/types/conjunto';
 
@@ -421,4 +432,305 @@ export const CORREOS_DEMO: DetalleCorreoBuzon[] = [
       'Cordial saludo, me podrían compartir por favor el apartado vigente del manual de convivencia sobre tránsito de mascotas en zonas comunes.',
     sugerencia: null,
   },
+];
+
+const SLA_POR_PRIORIDAD: Record<PrioridadSolicitud, number> = { ALTA: 4, MEDIA: 24, BAJA: 72 };
+
+const DESTINOS_POR_ESTADO: Record<EstadoSolicitud, EstadoSolicitud[]> = {
+  NUEVA: [],
+  ASIGNADA: ['EN_PROCESO', 'NUEVA'],
+  EN_PROCESO: ['RESUELTA'],
+  RESUELTA: ['CERRADA', 'EN_PROCESO'],
+  CERRADA: [],
+};
+
+function sumarMinutos(iso: string, minutos: number): string {
+  return new Date(new Date(iso).getTime() + minutos * 60_000).toISOString();
+}
+
+function historialBase(
+  fechaCreacion: string,
+  estado: EstadoSolicitud,
+  responsable: string | null,
+): { historial: EventoHistorialSolicitud[]; asignaciones: AsignacionSolicitud[]; primeraRespuesta: string | null; fechaCierre: string | null } {
+  const historial: EventoHistorialSolicitud[] = [
+    {
+      anterior: null,
+      nuevo: 'NUEVA',
+      usuario: null,
+      comentario: 'Creada automáticamente desde correo',
+      fecha: fechaCreacion,
+    },
+  ];
+  const asignaciones: AsignacionSolicitud[] = [];
+  let primeraRespuesta: string | null = null;
+  let fechaCierre: string | null = null;
+
+  if (estado === 'NUEVA') {
+    return { historial, asignaciones, primeraRespuesta, fechaCierre };
+  }
+
+  const fAsig = sumarMinutos(fechaCreacion, 25);
+  const nombreAsig = responsable ?? 'Soporte Demo';
+  asignaciones.push({ nombre: nombreAsig, fechaAsignacion: fAsig, liberadaEn: null });
+  historial.push({
+    anterior: 'NUEVA',
+    nuevo: 'ASIGNADA',
+    usuario: 'Administración Demo',
+    comentario: `Asignada a ${nombreAsig}`,
+    fecha: fAsig,
+  });
+
+  if (estado === 'ASIGNADA') {
+    return { historial, asignaciones, primeraRespuesta, fechaCierre };
+  }
+
+  const fProc = sumarMinutos(fechaCreacion, 60);
+  primeraRespuesta = fProc;
+  historial.push({
+    anterior: 'ASIGNADA',
+    nuevo: 'EN_PROCESO',
+    usuario: nombreAsig,
+    comentario: 'En atención por el equipo del conjunto',
+    fecha: fProc,
+  });
+
+  if (estado === 'EN_PROCESO') {
+    return { historial, asignaciones, primeraRespuesta, fechaCierre };
+  }
+
+  const fRes = sumarMinutos(fechaCreacion, 180);
+  historial.push({
+    anterior: 'EN_PROCESO',
+    nuevo: 'RESUELTA',
+    usuario: nombreAsig,
+    comentario: 'Gestión completada y notificada al residente',
+    fecha: fRes,
+  });
+
+  if (estado === 'RESUELTA') {
+    return { historial, asignaciones, primeraRespuesta, fechaCierre };
+  }
+
+  const fCierre = sumarMinutos(fechaCreacion, 360);
+  fechaCierre = fCierre;
+  asignaciones[0].liberadaEn = fCierre;
+  historial.push({
+    anterior: 'RESUELTA',
+    nuevo: 'CERRADA',
+    usuario: 'Administración Demo',
+    comentario: 'Caso cerrado tras confirmación',
+    fecha: fCierre,
+  });
+  return { historial, asignaciones, primeraRespuesta, fechaCierre };
+}
+
+const RESPONSABLE_CORREO_DEMO: Record<number, { id: number; nombre: string } | null> = {
+  22: null,
+  21: null,
+  20: { id: 2, nombre: 'Soporte Demo' },
+  19: { id: 2, nombre: 'Soporte Demo' },
+  18: { id: 2, nombre: 'Soporte Demo' },
+  17: { id: 3, nombre: 'Camila Torres' },
+  16: { id: 3, nombre: 'Camila Torres' },
+  15: null,
+  14: { id: 3, nombre: 'Camila Torres' },
+  13: null,
+  12: null,
+  11: { id: 2, nombre: 'Soporte Demo' },
+};
+
+function solicitudDesdeCorreo(c: DetalleCorreoBuzon): DetalleSolicitud {
+  const id = c.idSolicitud!;
+  const estado = (c.estado ?? 'NUEVA') as EstadoSolicitud;
+  const categoria = (c.categoria ?? 'SIN_CLASIFICAR') as CategoriaSolicitud;
+  const prioridad = (c.prioridad ?? 'MEDIA') as PrioridadSolicitud;
+  const resp = RESPONSABLE_CORREO_DEMO[id] ?? null;
+  const nombreParaHistorial = resp?.nombre ?? (estado === 'CERRADA' ? 'Soporte Demo' : null);
+  const meta = historialBase(c.fechaRecepcion, estado, nombreParaHistorial);
+  return {
+    id,
+    codigo: c.codigo!,
+    asunto: c.asunto,
+    remitente: c.remitente,
+    estado,
+    categoria,
+    prioridad,
+    slaHoras: SLA_POR_PRIORIDAD[prioridad],
+    version: estado === 'NUEVA' ? 1 : estado === 'ASIGNADA' ? 2 : estado === 'EN_PROCESO' ? 3 : 4,
+    fechaCreacion: c.fechaRecepcion,
+    primeraRespuesta: meta.primeraRespuesta,
+    fechaCierre: meta.fechaCierre,
+    responsable: resp?.nombre ?? null,
+    idResponsable: resp?.id ?? null,
+    cuerpo: c.cuerpo,
+    messageId: `<correo-${c.id}@demo.mailflow.test>`,
+    historial: meta.historial,
+    asignaciones: meta.asignaciones,
+    destinos: DESTINOS_POR_ESTADO[estado],
+    sugerencia: c.sugerencia,
+  };
+}
+
+function solicitudAdicional(p: {
+  id: number;
+  asunto: string;
+  remitente: string;
+  estado: EstadoSolicitud;
+  categoria: CategoriaSolicitud;
+  prioridad: PrioridadSolicitud;
+  fechaCreacion: string;
+  cuerpo: string;
+  resp: { id: number; nombre: string } | null;
+  sugerencia?: DetalleSolicitud['sugerencia'];
+}): DetalleSolicitud {
+  const codigo = `SOL-${String(p.id).padStart(6, '0')}`;
+  const nombreParaHistorial = p.resp?.nombre ?? (p.estado === 'CERRADA' ? 'Soporte Demo' : null);
+  const meta = historialBase(p.fechaCreacion, p.estado, nombreParaHistorial);
+  return {
+    id: p.id,
+    codigo,
+    asunto: p.asunto,
+    remitente: p.remitente,
+    estado: p.estado,
+    categoria: p.categoria,
+    prioridad: p.prioridad,
+    slaHoras: SLA_POR_PRIORIDAD[p.prioridad],
+    version: p.estado === 'NUEVA' ? 1 : p.estado === 'ASIGNADA' ? 2 : p.estado === 'EN_PROCESO' ? 3 : 4,
+    fechaCreacion: p.fechaCreacion,
+    primeraRespuesta: meta.primeraRespuesta,
+    fechaCierre: meta.fechaCierre,
+    responsable: p.resp?.nombre ?? null,
+    idResponsable: p.resp?.id ?? null,
+    cuerpo: p.cuerpo,
+    messageId: `<sol-${p.id}@demo.mailflow.test>`,
+    historial: meta.historial,
+    asignaciones: meta.asignaciones,
+    destinos: DESTINOS_POR_ESTADO[p.estado],
+    sugerencia: p.sugerencia ?? null,
+  };
+}
+
+export const SOLICITUDES_DEMO: DetalleSolicitud[] = [
+  ...CORREOS_DEMO.filter((c) => c.idSolicitud !== null).map(solicitudDesdeCorreo),
+  solicitudAdicional({
+    id: 10,
+    asunto: 'Solicitud de copia de manual de parqueaderos',
+    remitente: 'laura.gomez@demo.mailflow.test',
+    estado: 'NUEVA',
+    categoria: 'SIN_CLASIFICAR',
+    prioridad: 'MEDIA',
+    fechaCreacion: '2026-11-10T10:00:00.000Z',
+    cuerpo: 'Buen día, me gustaría recibir copia del reglamento actualizado de parqueaderos de visitantes.',
+    resp: null,
+    sugerencia: {
+      estado: 'LISTA',
+      categoria: 'ADMINISTRATIVO',
+      prioridad: 'BAJA',
+      resumen: 'Solicitud de copia del reglamento de parqueaderos.',
+      justificacion: 'Consulta documental de convivencia y administración.',
+      proveedor: 'openrouter',
+      modelo: 'gpt-4o-mini',
+      fechaActualizacion: '2026-11-10T10:02:00.000Z',
+    },
+  }),
+  solicitudAdicional({
+    id: 9,
+    asunto: 'Mantenimiento preventivo puerta vehicular torre 1',
+    remitente: 'oscar.marin@demo.mailflow.test',
+    estado: 'EN_PROCESO',
+    categoria: 'MANTENIMIENTO',
+    prioridad: 'MEDIA',
+    fechaCreacion: '2026-11-09T14:30:00.000Z',
+    cuerpo: 'La puerta vehicular hace un sonido fuerte al abrir y cerrar desde ayer.',
+    resp: { id: 2, nombre: 'Soporte Demo' },
+  }),
+  solicitudAdicional({
+    id: 8,
+    asunto: 'Aclaración cobro de intereses de mora',
+    remitente: 'natalia.cruz@demo.mailflow.test',
+    estado: 'EN_PROCESO',
+    categoria: 'FACTURACION',
+    prioridad: 'MEDIA',
+    fechaCreacion: '2026-11-08T11:15:00.000Z',
+    cuerpo: 'Solicito revisión del cobro de mora reflejado en el recibo del mes pasado.',
+    resp: { id: 2, nombre: 'Soporte Demo' },
+  }),
+  solicitudAdicional({
+    id: 7,
+    asunto: 'Pintura de señalización en zona de visitantes',
+    remitente: 'sergio.silva@demo.mailflow.test',
+    estado: 'RESUELTA',
+    categoria: 'MANTENIMIENTO',
+    prioridad: 'BAJA',
+    fechaCreacion: '2026-11-07T09:00:00.000Z',
+    cuerpo: 'La demarcación de dos cupos de visitantes está muy desgastada.',
+    resp: { id: 2, nombre: 'Soporte Demo' },
+  }),
+  solicitudAdicional({
+    id: 6,
+    asunto: 'Permiso para adecuación menor en cocina',
+    remitente: 'claudia.parra@demo.mailflow.test',
+    estado: 'RESUELTA',
+    categoria: 'ADMINISTRATIVO',
+    prioridad: 'BAJA',
+    fechaCreacion: '2026-11-06T16:40:00.000Z',
+    cuerpo: 'Solicito autorización de horario para cambio de mesón en apartamento T2-203.',
+    resp: { id: 3, nombre: 'Camila Torres' },
+  }),
+  solicitudAdicional({
+    id: 5,
+    asunto: 'Envío de estado de cuenta acumulado 2026',
+    remitente: 'hector.arias@demo.mailflow.test',
+    estado: 'RESUELTA',
+    categoria: 'FACTURACION',
+    prioridad: 'MEDIA',
+    fechaCreacion: '2026-11-05T13:20:00.000Z',
+    cuerpo: 'Agradezco el envío del histórico de pagos del año en curso.',
+    resp: { id: 2, nombre: 'Soporte Demo' },
+  }),
+  solicitudAdicional({
+    id: 4,
+    asunto: 'Revisión de motobomba de presión torre 3',
+    remitente: 'monica.reyes@demo.mailflow.test',
+    estado: 'RESUELTA',
+    categoria: 'MANTENIMIENTO',
+    prioridad: 'ALTA',
+    fechaCreacion: '2026-11-04T08:10:00.000Z',
+    cuerpo: 'Se presentó baja presión de agua en los pisos altos de torre 3.',
+    resp: { id: 3, nombre: 'Camila Torres' },
+  }),
+  solicitudAdicional({
+    id: 3,
+    asunto: 'Registro de nueva mascota en censo del conjunto',
+    remitente: 'david.luna@demo.mailflow.test',
+    estado: 'RESUELTA',
+    categoria: 'ADMINISTRATIVO',
+    prioridad: 'BAJA',
+    fechaCreacion: '2026-11-03T12:00:00.000Z',
+    cuerpo: 'Adjunto carné de vacunación para actualizar el registro de mascotas.',
+    resp: { id: 2, nombre: 'Soporte Demo' },
+  }),
+  solicitudAdicional({
+    id: 2,
+    asunto: 'Revisión de cámara de acceso peatonal sur',
+    remitente: 'beatriz.navas@demo.mailflow.test',
+    estado: 'CERRADA',
+    categoria: 'SEGURIDAD',
+    prioridad: 'ALTA',
+    fechaCreacion: '2026-11-02T19:30:00.000Z',
+    cuerpo: 'La cámara del acceso sur estuvo intermitente durante la noche.',
+    resp: null,
+  }),
+  solicitudAdicional({
+    id: 1,
+    asunto: 'Cambio de bombillo en escalera de emergencia',
+    remitente: 'ivan.castro@demo.mailflow.test',
+    estado: 'CERRADA',
+    categoria: 'MANTENIMIENTO',
+    prioridad: 'BAJA',
+    fechaCreacion: '2026-11-01T10:15:00.000Z',
+    cuerpo: 'En el descanso del segundo piso falta iluminación en la escalera.',
+    resp: null,
+  }),
 ];

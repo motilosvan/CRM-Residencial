@@ -1,6 +1,7 @@
 import { ErrorAuth, type AuthService, type CodigoEnviado, type SolicitudCodigo } from '../contratos';
 import type { Sesion } from '@/types/conjunto';
 import { CODIGO_DEMO, CONJUNTOS_DEMO, USUARIOS_DEMO } from './datos';
+import { setSesionMock } from './sesionMockEstado';
 import type { OpcionesMock } from './tipos';
 import { esperar, fallaRed } from './util';
 
@@ -90,6 +91,7 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
           conjuntos: CONJUNTOS_DEMO.filter((c) => conjuntoIds.includes(c.id)).map((c) => ({ ...c })),
           ultimaActividad: ahora(),
         };
+        setSesionMock(sesionActual);
         return copia(sesionActual);
       }
 
@@ -116,11 +118,13 @@ export function crearAuthMock(o: OpcionesMock = {}): AuthService {
       const nuevo = sesionActual.conjuntos.find((c) => c.id === conjuntoId);
       if (!nuevo) throw new ErrorAuth('SIN_MEMBRESIA');
       sesionActual = { ...sesionActual, conjuntoActivo: { ...nuevo }, ultimaActividad: ahora() };
+      setSesionMock(sesionActual);
       return copia(sesionActual);
     },
 
     async salir(): Promise<void> {
       sesionActual = null;
+      setSesionMock(null);
     },
   };
 }

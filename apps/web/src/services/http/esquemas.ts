@@ -82,6 +82,14 @@ export const esquemaResultadoSincronizacion = z.object({
 
 const esquemaEstadoSugerencia = z.enum(['EN_REINTENTO', 'LISTA', 'FALLIDA']);
 const esquemaEstadoSolicitud = z.enum(['NUEVA', 'ASIGNADA', 'EN_PROCESO', 'RESUELTA', 'CERRADA']);
+const esquemaCategoriaSolicitud = z.enum([
+  'SEGURIDAD',
+  'MANTENIMIENTO',
+  'FACTURACION',
+  'ADMINISTRATIVO',
+  'SIN_CLASIFICAR',
+]);
+const esquemaPrioridadSolicitud = z.enum(['ALTA', 'MEDIA', 'BAJA']);
 
 export const esquemaSugerenciaGuardada = z.object({
   estado: esquemaEstadoSugerencia,
@@ -124,4 +132,73 @@ export const esquemaDetalleCorreo = esquemaFilaCorreoBase.extend({
   cuerpo: z.string(),
   cuerpoEnmascarado: z.string(),
   sugerencia: esquemaSugerenciaGuardada.nullable(),
+});
+
+export const esquemaFilaSolicitud = z.object({
+  id: z.number().int().positive(),
+  codigo: z.string(),
+  asunto: z.string().nullable(),
+  remitente: z.string(),
+  estado: esquemaEstadoSolicitud,
+  categoria: esquemaCategoriaSolicitud,
+  prioridad: esquemaPrioridadSolicitud,
+  slaHoras: z.number().int().positive(),
+  version: z.number().int().positive(),
+  fechaCreacion: z.string(),
+  primeraRespuesta: z.string().nullable(),
+  fechaCierre: z.string().nullable(),
+  responsable: z.string().nullable(),
+  idResponsable: z.number().int().positive().nullable(),
+});
+
+export const esquemaListaSolicitudes = z.array(esquemaFilaSolicitud);
+
+export const esquemaEventoHistorialSolicitud = z.object({
+  anterior: esquemaEstadoSolicitud.nullable(),
+  nuevo: esquemaEstadoSolicitud,
+  usuario: z.string().nullable(),
+  comentario: z.string().nullable(),
+  fecha: z.string(),
+});
+
+export const esquemaAsignacionSolicitud = z.object({
+  nombre: z.string(),
+  fechaAsignacion: z.string(),
+  liberadaEn: z.string().nullable(),
+});
+
+export const esquemaDetalleSolicitud = esquemaFilaSolicitud.extend({
+  cuerpo: z.string(),
+  messageId: z.string(),
+  historial: z.array(esquemaEventoHistorialSolicitud),
+  asignaciones: z.array(esquemaAsignacionSolicitud),
+  destinos: z.array(esquemaEstadoSolicitud),
+  sugerencia: esquemaSugerenciaGuardada.nullable(),
+});
+
+export const esquemaResultadoAsignacion = z.union([
+  z.object({
+    sinCambios: z.literal(true),
+    version: z.number().int().positive(),
+  }),
+  z.object({
+    sinCambios: z.literal(false),
+    version: z.number().int().positive(),
+    estado: esquemaEstadoSolicitud,
+    idAsignacion: z.number().int().positive(),
+  }),
+]);
+
+export const esquemaResultadoCambioEstado = z.object({
+  idSolicitud: z.number().int().positive(),
+  estado: esquemaEstadoSolicitud,
+  version: z.number().int().positive(),
+});
+
+export const esquemaResultadoReclasificacion = z.object({
+  idSolicitud: z.number().int().positive(),
+  categoria: esquemaCategoriaSolicitud,
+  prioridad: esquemaPrioridadSolicitud,
+  version: z.number().int().positive(),
+  sinCambios: z.boolean(),
 });

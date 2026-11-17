@@ -4,6 +4,7 @@ import { respuesta, simularFetch } from './ayudas.test-util';
 import { crearBuzonHttp } from './buzonHttp';
 import { crearCorreosHttp } from './correosHttp';
 import { crearResumenHttp } from './resumenHttp';
+import { crearSolicitudesHttp } from './solicitudesHttp';
 import { crearUsuariosHttp } from './usuariosHttp';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -316,6 +317,209 @@ describe('usuariosHttp', () => {
     await expect(crearUsuariosHttp().actualizar(999, { rol: 'ADMIN', versionEsperada: 1 })).rejects.toMatchObject({
       estado: 404,
       tipo: 'NO_ENCONTRADO',
+    });
+  });
+});
+
+describe('solicitudesHttp', () => {
+  const filaBase = {
+    id: 22,
+    codigo: 'SOL-000022',
+    asunto: 'Fuga de agua en sótano',
+    remitente: 'elena.vargas@demo.mailflow.test',
+    estado: 'NUEVA' as const,
+    categoria: 'MANTENIMIENTO' as const,
+    prioridad: 'ALTA' as const,
+    slaHoras: 4,
+    version: 1,
+    fechaCreacion: '2026-11-16T15:10:00.000Z',
+    primeraRespuesta: null,
+    fechaCierre: null,
+    responsable: null,
+    idResponsable: null,
+  };
+
+  const detalleBase = {
+    ...filaBase,
+    cuerpo: 'Hay una fuga de agua en el sótano 1.',
+    messageId: '<msg-22@demo.mailflow.test>',
+    historial: [
+      {
+        anterior: null,
+        nuevo: 'NUEVA' as const,
+        usuario: null,
+        comentario: 'Creada automáticamente desde correo',
+        fecha: '2026-11-16T15:10:00.000Z',
+      },
+    ],
+    asignaciones: [],
+    destinos: [],
+    sugerencia: {
+      estado: 'LISTA' as const,
+      categoria: 'MANTENIMIENTO',
+      prioridad: 'ALTA',
+      resumen: 'Fuga de agua en sótano.',
+      justificacion: 'Fuga reportada en zona común.',
+      proveedor: 'openrouter',
+      modelo: 'gpt-4o-mini',
+      fechaActualizacion: '2026-11-16T15:11:00.000Z',
+    },
+  };
+
+  it('listar: GET /api/solicitudes sin filtros y con filtros + signal', async () => {
+    const ctl = new AbortController();
+    const f1 = simularFetch(async () => respuesta(200, [filaBase]));
+    expect(await crearSolicitudesHttp().listar(undefined, ctl.signal)).toEqual([filaBase]);
+    expect(f1).toHaveBeenCalledWith(
+      '/api/solicitudes',
+      expect.objectContaining({ credentials: 'same-origin', signal: ctl.signal }),
+    );
+
+    const f2 = simularFetch(async () => respuesta(200, []));
+    await crearSolicitudesHttp().listar({
+      estado: 'EN_PROCESO',
+      categoria: 'SEGURIDAD',
+      prioridad: 'ALTA',
+      idResponsable: 2,
+      limite: 20,
+      desplazamiento: 40,
+    });
+    expect(f2.mock.calls[0][0]).toBe(
+      '/api/solicitudes?estado=EN_PROCESO&categoria=SEGURIDAD&prioridad=ALTA&idResponsable=2&limite=20&desplazamiento=40',
+    );
+  });
+
+  it('listar: forma inválida → RED; 401/422 → ErrorApi', async () => {
+    simularFetch(async () => respuesta(200, [{ id: 'mal' }]));
+    await expect(crearSolicitudesHttp().listar()).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+
+    simularFetch(async () => respuesta(422, { error: 'Filtro inválido' }));
+    await expect(crearSolicitudesHttp().listar()).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+
+    simularFetch(async () => respuesta(401, { error: 'Sesión no iniciada' }));
+    await expect(crearSolicitudesHttp().listar()).rejects.toMatchObject({ estado: 401, tipo: 'NO_AUTENTICADO' });
+  });
+
+  it('detalle: GET /api/solicitudes/:id con y sin sugerencia; 403/404 y forma inválida', async () => {
+    const ctl = new AbortController();
+    const f = simularFetch(async () => respuesta(200, detalleBase));
+    expect(await crearSolicitudesHttp().detalle(22, ctl.signal)).toEqual(detalleBase);
+    expect(f).toHaveBeenCalledWith('/api/solicitudes/22', expect.objectContaining({ signal: ctl.signal }));
+
+    const sinSugerencia = { ...detalleBase, sugerencia: null };
+    simularFetch(async () => respuesta(200, sinSugerencia));
+    expect(await crearSolicitudesHttp().detalle(22)).toEqual(sinSugerencia);
+
+    simularFetch(async () => respuesta(403, { error: 'Solo puedes consultar tus solicitudes asignadas' }));
+    await expect(crearSolicitudesHttp().detalle(22)).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+
+    simularFetch(async () => respuesta(404, { error: 'La solicitud 999 no existe' }));
+    await expect(crearSolicitudesHttp().detalle(999)).rejects.toMatchObject({ estado: 404, tipo: 'NO_ENCONTRADO' });
+
+    simularFetch(async () => respuesta(200, { ...filaBase, destinos: ['INVALIDO'] }));
+    await expect(crearSolicitudesHttp().detalle(22)).rejects.toMatchObject({ tipo: 'RED', estado: 0 });
+  });
+
+  it('asignar: POST /api/solicitudes/:id/asignar con cambio y sinCambios; 409/403/422', async () => {
+    const okCambio = { sinCambios: false as const, version: 2, estado: 'ASIGNADA' as const, idAsignacion: 10 };
+    const f1 = simularFetch(async () => respuesta(200, okCambio));
+    expect(await crearSolicitudesHttp().asignar(22, { idResponsable: 2, versionEsperada: 1 })).toEqual(okCambio);
+    expect(f1.mock.calls[0][0]).toBe('/api/solicitudes/22/asignar');
+    expect(f1.mock.calls[0][1]?.method).toBe('POST');
+    expect(cuerpoDe(f1)).toEqual({ idResponsable: 2, versionEsperada: 1 });
+
+    const okSinCambios = { sinCambios: true as const, version: 2 };
+    simularFetch(async () => respuesta(200, okSinCambios));
+    expect(await crearSolicitudesHttp().asignar(22, { idResponsable: 2, versionEsperada: 2 })).toEqual(okSinCambios);
+
+    simularFetch(async () => respuesta(409, { error: 'La solicitud 22 cambió (versión 2, se esperaba 1). Recárguela.' }));
+    await expect(crearSolicitudesHttp().asignar(22, { idResponsable: 2, versionEsperada: 1 })).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+    });
+
+    simularFetch(async () => respuesta(403, { error: 'Solo un administrador puede asignar solicitudes' }));
+    await expect(crearSolicitudesHttp().asignar(22, { idResponsable: 2, versionEsperada: 2 })).rejects.toMatchObject({
+      estado: 403,
+      tipo: 'PROHIBIDO',
+    });
+
+    simularFetch(async () => respuesta(422, { error: 'No se puede asignar una solicitud en estado CERRADA' }));
+    await expect(crearSolicitudesHttp().asignar(22, { idResponsable: 2, versionEsperada: 2 })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
+    });
+  });
+
+  it('cambiarEstado: POST /api/solicitudes/:id/estado envía nuevoEstado, versionEsperada y comentario; 409/422/403', async () => {
+    const ok = { idSolicitud: 22, estado: 'EN_PROCESO' as const, version: 3 };
+    const f = simularFetch(async () => respuesta(200, ok));
+    expect(
+      await crearSolicitudesHttp().cambiarEstado(22, {
+        nuevoEstado: 'EN_PROCESO',
+        versionEsperada: 2,
+        comentario: 'En revisión',
+      }),
+    ).toEqual(ok);
+    expect(f.mock.calls[0][0]).toBe('/api/solicitudes/22/estado');
+    expect(f.mock.calls[0][1]?.method).toBe('POST');
+    expect(cuerpoDe(f)).toEqual({ nuevoEstado: 'EN_PROCESO', versionEsperada: 2, comentario: 'En revisión' });
+
+    simularFetch(async () => respuesta(409, { error: 'La solicitud 22 cambió. Recárguela.' }));
+    await expect(
+      crearSolicitudesHttp().cambiarEstado(22, { nuevoEstado: 'RESUELTA', versionEsperada: 2 }),
+    ).rejects.toMatchObject({ estado: 409, tipo: 'CONFLICTO' });
+
+    simularFetch(async () => respuesta(422, { error: 'Transición inválida de NUEVA a CERRADA' }));
+    await expect(
+      crearSolicitudesHttp().cambiarEstado(22, { nuevoEstado: 'CERRADA', versionEsperada: 1 }),
+    ).rejects.toMatchObject({ estado: 422, tipo: 'INVALIDO' });
+  });
+
+  it('reclasificar: POST /api/solicitudes/:id/reclasificar y aceptarSugerencia: POST /api/solicitudes/:id/aceptar-sugerencia', async () => {
+    const okReclas = {
+      idSolicitud: 22,
+      categoria: 'SEGURIDAD' as const,
+      prioridad: 'ALTA' as const,
+      version: 2,
+      sinCambios: false,
+    };
+    const f1 = simularFetch(async () => respuesta(200, okReclas));
+    expect(
+      await crearSolicitudesHttp().reclasificar(22, {
+        categoria: 'SEGURIDAD',
+        prioridad: 'ALTA',
+        versionEsperada: 1,
+        comentario: 'Ajuste manual',
+      }),
+    ).toEqual(okReclas);
+    expect(f1.mock.calls[0][0]).toBe('/api/solicitudes/22/reclasificar');
+    expect(f1.mock.calls[0][1]?.method).toBe('POST');
+    expect(cuerpoDe(f1)).toEqual({
+      categoria: 'SEGURIDAD',
+      prioridad: 'ALTA',
+      versionEsperada: 1,
+      comentario: 'Ajuste manual',
+    });
+
+    const f2 = simularFetch(async () => respuesta(200, { ...okReclas, version: 3 }));
+    expect(
+      await crearSolicitudesHttp().aceptarSugerencia(22, { versionEsperada: 2, comentario: 'Confirmada' }),
+    ).toEqual({ ...okReclas, version: 3 });
+    expect(f2.mock.calls[0][0]).toBe('/api/solicitudes/22/aceptar-sugerencia');
+    expect(f2.mock.calls[0][1]?.method).toBe('POST');
+    expect(cuerpoDe(f2)).toEqual({ versionEsperada: 2, comentario: 'Confirmada' });
+
+    simularFetch(async () => respuesta(409, { error: 'La solicitud cambió. Recárguela.' }));
+    await expect(crearSolicitudesHttp().aceptarSugerencia(22, { versionEsperada: 1 })).rejects.toMatchObject({
+      estado: 409,
+      tipo: 'CONFLICTO',
+    });
+
+    simularFetch(async () => respuesta(422, { error: 'No hay una sugerencia lista para aceptar en esta solicitud' }));
+    await expect(crearSolicitudesHttp().aceptarSugerencia(22, { versionEsperada: 2 })).rejects.toMatchObject({
+      estado: 422,
+      tipo: 'INVALIDO',
     });
   });
 });

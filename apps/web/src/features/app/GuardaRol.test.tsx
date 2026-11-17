@@ -17,6 +17,14 @@ vi.mock('@/services', () => ({
     sincronizar: vi.fn(),
   },
   correosService: { listar: () => Promise.resolve({ total: 0, correos: [] }), detalle: vi.fn() },
+  solicitudesService: {
+    listar: () => Promise.resolve([]),
+    detalle: vi.fn(),
+    asignar: vi.fn(),
+    cambiarEstado: vi.fn(),
+    reclasificar: vi.fn(),
+    aceptarSugerencia: vi.fn(),
+  },
   usuariosService: {
     listar: () => Promise.resolve([]),
     agregar: vi.fn(),

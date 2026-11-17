@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ErrorApi } from '../contratos';
+import { CODIGO_DEMO, crearAuthMock } from './authMock';
 import { crearBuzonMock } from './buzonMock';
 import { crearCorreosMock } from './correosMock';
-import { CORREOS_DEMO } from './datos';
+import { CORREOS_DEMO, SOLICITUDES_DEMO } from './datos';
 import { crearResumenMock } from './resumenMock';
+import { getSesionMock, setSesionMock } from './sesionMockEstado';
+import { actorDesdeSesionMock, crearSolicitudesMock } from './solicitudesMock';
 import { crearUsuariosMock } from './usuariosMock';
 
 const SIN_LATENCIA = { latenciaMs: [0, 0] as [number, number] };
@@ -263,5 +266,239 @@ describe('usuariosMock', () => {
       estado: 404,
       tipo: 'NO_ENCONTRADO',
     });
+  });
+});
+
+describe('solicitudesMock', () => {
+  it('datos demo cumplen Ley 1581 (@demo.mailflow.test), vinculan CORREOS_DEMO (id=22) y tienen estados y sugerencias variadas', () => {
+    expect(SOLICITUDES_DEMO.length).toBeGreaterThanOrEqual(12);
+    for (const s of SOLICITUDES_DEMO) {
+      expect(s.remitente).toMatch(/@demo\.mailflow\.test$/);
+      expect(s.destinos).not.toContain('ASIGNADA');
+    }
+    const sol22 = SOLICITUDES_DEMO.find((s) => s.id === 22);
+    expect(sol22).toMatchObject({ codigo: 'SOL-000022', estado: 'NUEVA' });
+    expect(SOLICITUDES_DEMO.some((s) => s.estado === 'NUEVA')).toBe(true);
+    expect(
+      SOLICITUDES_DEMO.some(
+        (s) =>
+          s.estado !== 'CERRADA' &&
+          s.sugerencia?.estado === 'LISTA' &&
+          (s.sugerencia.categoria !== s.categoria || s.sugerencia.prioridad !== s.prioridad),
+      ),
+    ).toBe(true);
+  });
+
+  it('listar ordena por peso de prioridad y fecha, filtra, pagina y restringe SOPORTE a sus asignadas', async () => {
+    const srvAdmin = crearSolicitudesMock(SIN_LATENCIA);
+    const todas = await srvAdmin.listar();
+    expect(todas.length).toBe(SOLICITUDES_DEMO.length);
+
+    // Orden: ALTA antes que MEDIA antes que BAJA
+    const peso = { ALTA: 3, MEDIA: 2, BAJA: 1 } as const;
+    for (let i = 1; i < todas.length; i++) {
+      expect(peso[todas[i - 1].prioridad]).toBeGreaterThanOrEqual(peso[todas[i].prioridad]);
+    }
+
+    const nuevas = await srvAdmin.listar({ estado: 'NUEVA' });
+    expect(nuevas.length).toBeGreaterThan(0);
+    expect(nuevas.every((s) => s.estado === 'NUEVA')).toBe(true);
+
+    const pag2 = await srvAdmin.listar({ limite: 3, desplazamiento: 3 });
+    expect(pag2).toHaveLength(3);
+    expect(pag2[0].id).toBe(todas[3].id);
+
+    // Mutar la respuesta no altera el estado interno
+    todas[0].asunto = 'Alterado';
+    expect((await srvAdmin.listar())[0].asunto).not.toBe('Alterado');
+
+    const srvSoporte = crearSolicitudesMock({
+      ...SIN_LATENCIA,
+      actor: { idUsuario: 2, nombre: 'Soporte Demo', rol: 'SOPORTE' },
+    });
+    const asignadasSoporte = await srvSoporte.listar();
+    expect(asignadasSoporte.length).toBeGreaterThan(0);
+    expect(asignadasSoporte.every((s) => s.idResponsable === 2)).toBe(true);
+
+    const ajena = todas.find((s) => s.idResponsable !== 2)!;
+    await expect(srvSoporte.detalle(ajena.id)).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+    await expect(srvSoporte.detalle(999_999)).rejects.toMatchObject({ estado: 404, tipo: 'NO_ENCONTRADO' });
+  });
+
+  it('T2 (asignar): pasa NUEVA→ASIGNADA, deja historial, libera asignación previa al reasignar, 409/403/422/404', async () => {
+    const srv = crearSolicitudesMock(SIN_LATENCIA);
+    const antes = await srv.detalle(22);
+    expect(antes.estado).toBe('NUEVA');
+    expect(antes.destinos).toEqual([]);
+
+    const r1 = await srv.asignar(22, { idResponsable: 2, versionEsperada: antes.version });
+    expect(r1).toMatchObject({ sinCambios: false, estado: 'ASIGNADA', version: antes.version + 1 });
+
+    // Mismo responsable → sinCambios: true, sin subir versión
+    const idem = await srv.asignar(22, { idResponsable: 2, versionEsperada: r1.version });
+    expect(idem).toEqual({ sinCambios: true, version: r1.version });
+
+    // Reasignar a Camila (id 3) libera la asignación anterior
+    const r2 = await srv.asignar(22, { idResponsable: 3, versionEsperada: r1.version });
+    expect(r2).toMatchObject({ sinCambios: false, estado: 'ASIGNADA', version: r1.version + 1 });
+
+    const despues = await srv.detalle(22);
+    expect(despues.idResponsable).toBe(3);
+    expect(despues.responsable).toBe('Camila Torres');
+    expect(despues.destinos).toEqual(['EN_PROCESO', 'NUEVA']);
+    expect(despues.asignaciones).toHaveLength(2);
+    expect(despues.asignaciones[0].liberadaEn).not.toBeNull();
+    expect(despues.asignaciones[1].liberadaEn).toBeNull();
+    expect(despues.historial.some((h) => h.anterior === 'NUEVA' && h.nuevo === 'ASIGNADA')).toBe(true);
+
+    // 409 versión vieja, 422 usuario inactivo/inexistente, 404 solicitud inexistente, 403 SOPORTE
+    await expect(srv.asignar(22, { idResponsable: 2, versionEsperada: 1 })).rejects.toMatchObject({ estado: 409 });
+    await expect(srv.asignar(22, { idResponsable: 4, versionEsperada: r2.version })).rejects.toMatchObject({ estado: 422 });
+    await expect(srv.asignar(999_999, { idResponsable: 2, versionEsperada: 1 })).rejects.toMatchObject({ estado: 404 });
+
+    const srvSoporte = crearSolicitudesMock({
+      ...SIN_LATENCIA,
+      actor: { idUsuario: 3, nombre: 'Camila Torres', rol: 'SOPORTE' },
+    });
+    await expect(srvSoporte.asignar(22, { idResponsable: 2, versionEsperada: 1 })).rejects.toMatchObject({ estado: 403 });
+  });
+
+  it('T3 (cambiarEstado): respeta transiciones, impide ASIGNADA manual, libera en NUEVA/CERRADA, 409 y 403', async () => {
+    const srv = crearSolicitudesMock(SIN_LATENCIA);
+    // Solicitud 22 está NUEVA: no puede saltar a EN_PROCESO ni a ASIGNADA manual ni CERRADA
+    await expect(srv.cambiarEstado(22, { nuevoEstado: 'EN_PROCESO', versionEsperada: 1 })).rejects.toMatchObject({
+      estado: 422,
+    });
+    await expect(srv.cambiarEstado(22, { nuevoEstado: 'ASIGNADA', versionEsperada: 1 })).rejects.toMatchObject({
+      estado: 422,
+    });
+
+    // Asignar a Soporte Demo (id 2) → ASIGNADA → EN_PROCESO → RESUELTA → CERRADA
+    const a1 = await srv.asignar(22, { idResponsable: 2, versionEsperada: 1 });
+    const e1 = await srv.cambiarEstado(22, {
+      nuevoEstado: 'EN_PROCESO',
+      versionEsperada: a1.version,
+      comentario: 'Atendiendo fuga',
+    });
+    expect(e1).toEqual({ idSolicitud: 22, estado: 'EN_PROCESO', version: a1.version + 1 });
+    expect((await srv.detalle(22)).primeraRespuesta).not.toBeNull();
+
+    // 409 si envía versión anterior
+    await expect(srv.cambiarEstado(22, { nuevoEstado: 'RESUELTA', versionEsperada: a1.version })).rejects.toMatchObject({
+      estado: 409,
+    });
+
+    const e2 = await srv.cambiarEstado(22, { nuevoEstado: 'RESUELTA', versionEsperada: e1.version });
+    const detResuelta = await srv.detalle(22);
+    expect(detResuelta.destinos).toEqual(['CERRADA', 'EN_PROCESO']);
+
+    const e3 = await srv.cambiarEstado(22, { nuevoEstado: 'CERRADA', versionEsperada: e2.version });
+    const detCerrada = await srv.detalle(22);
+    expect(detCerrada.fechaCierre).not.toBeNull();
+    expect(detCerrada.destinos).toEqual([]);
+    expect(detCerrada.idResponsable).toBeNull();
+    expect(detCerrada.asignaciones[0].liberadaEn).not.toBeNull();
+    expect(e3.version).toBe(detCerrada.version);
+
+    // SOPORTE no puede cambiar estado de solicitud no asignada a él (403)
+    const srvOtroSoporte = crearSolicitudesMock({
+      ...SIN_LATENCIA,
+      actor: { idUsuario: 3, nombre: 'Camila Torres', rol: 'SOPORTE' },
+    });
+    const det20 = await srv.detalle(20);
+    await expect(
+      srvOtroSoporte.cambiarEstado(20, { nuevoEstado: 'EN_PROCESO', versionEsperada: det20.version }),
+    ).rejects.toMatchObject({ estado: 403 });
+  });
+
+  it('T4 (reclasificar) y T7→T4 (aceptarSugerencia): actualizan categoría/prioridad/SLA e historial, 409, 403, 422', async () => {
+    const srv = crearSolicitudesMock(SIN_LATENCIA);
+    const det21 = await srv.detalle(21);
+    const r = await srv.reclasificar(21, {
+      categoria: 'SEGURIDAD',
+      prioridad: 'ALTA',
+      versionEsperada: det21.version,
+      comentario: 'Ajuste por riesgo',
+    });
+    expect(r).toMatchObject({
+      idSolicitud: 21,
+      categoria: 'SEGURIDAD',
+      prioridad: 'ALTA',
+      version: det21.version + 1,
+      sinCambios: false,
+    });
+    const det21Despues = await srv.detalle(21);
+    expect(det21Despues.slaHoras).toBe(4);
+    expect(det21Despues.historial.at(-1)?.comentario).toContain('Reclasificada:');
+
+    // Sin cambios no sube versión
+    const rSinCambios = await srv.reclasificar(21, {
+      categoria: 'SEGURIDAD',
+      prioridad: 'ALTA',
+      versionEsperada: r.version,
+    });
+    expect(rSinCambios).toMatchObject({ sinCambios: true, version: r.version });
+
+    // Aceptar sugerencia en solicitud con sugerencia LISTA distinta de su clasificación actual
+    const conSug = SOLICITUDES_DEMO.find(
+      (s) =>
+        s.estado !== 'CERRADA' &&
+        s.sugerencia?.estado === 'LISTA' &&
+        (s.sugerencia.categoria !== s.categoria || s.sugerencia.prioridad !== s.prioridad),
+    )!;
+    const detSug = await srv.detalle(conSug.id);
+    const acep = await srv.aceptarSugerencia(conSug.id, { versionEsperada: detSug.version, comentario: 'IA correcta' });
+    expect(acep.sinCambios).toBe(false);
+    expect(acep.version).toBe(detSug.version + 1);
+    const detSugDespues = await srv.detalle(conSug.id);
+    expect(detSugDespues.historial.at(-1)?.comentario).toContain('Sugerencia IA aceptada:');
+
+    // 409 versión vieja, 422 sin sugerencia LISTA (solicitud 20), 403 SOPORTE
+    const det20 = await srv.detalle(20);
+    await expect(srv.reclasificar(21, { prioridad: 'MEDIA', versionEsperada: 1 })).rejects.toMatchObject({ estado: 409 });
+    await expect(srv.aceptarSugerencia(20, { versionEsperada: det20.version })).rejects.toMatchObject({ estado: 422 });
+
+    const srvSoporte = crearSolicitudesMock({
+      ...SIN_LATENCIA,
+      actor: { idUsuario: 2, nombre: 'Soporte Demo', rol: 'SOPORTE' },
+    });
+    await expect(srvSoporte.reclasificar(20, { prioridad: 'ALTA', versionEsperada: det20.version })).rejects.toMatchObject({
+      estado: 403,
+    });
+    await expect(srvSoporte.aceptarSugerencia(20, { versionEsperada: det20.version })).rejects.toMatchObject({
+      estado: 403,
+    });
+  });
+
+  it('sincroniza actorDesdeSesionMock con authMock (SOPORTE queda restringido a sus asignadas y salir() limpia sesión)', async () => {
+    setSesionMock(null);
+    const auth = crearAuthMock(SIN_LATENCIA);
+    const srv = crearSolicitudesMock({ ...SIN_LATENCIA, actor: () => actorDesdeSesionMock() });
+
+    try {
+      // Sin sesión cae al respaldo ADMIN
+      expect(getSesionMock()).toBeNull();
+      expect(actorDesdeSesionMock()).toMatchObject({ idUsuario: 1, rol: 'ADMIN' });
+      expect((await srv.listar()).length).toBe(SOLICITUDES_DEMO.length);
+
+      // Inicia sesión como soporte@demo.mailflow.test -> idUsuario 2, rol SOPORTE
+      await auth.solicitarCodigo({ conjuntoId: 'cj-parques', correo: 'soporte@demo.mailflow.test' });
+      await auth.verificarCodigo({ conjuntoId: 'cj-parques', correo: 'soporte@demo.mailflow.test', codigo: CODIGO_DEMO });
+      expect(getSesionMock()?.usuario.correo).toBe('soporte@demo.mailflow.test');
+      expect(actorDesdeSesionMock()).toEqual({ idUsuario: 2, nombre: 'Soporte Demo', rol: 'SOPORTE' });
+
+      const deSoporte = await srv.listar();
+      expect(deSoporte.length).toBeGreaterThan(0);
+      expect(deSoporte.every((s) => s.idResponsable === 2)).toBe(true);
+      await expect(srv.detalle(22)).rejects.toMatchObject({ estado: 403, tipo: 'PROHIBIDO' });
+      await expect(srv.detalle(20)).resolves.toMatchObject({ id: 20, idResponsable: 2 });
+
+      // Al salir se limpia sesionMockEstado
+      await auth.salir();
+      expect(getSesionMock()).toBeNull();
+      expect(actorDesdeSesionMock()).toMatchObject({ idUsuario: 1, rol: 'ADMIN' });
+    } finally {
+      setSesionMock(null);
+    }
   });
 });

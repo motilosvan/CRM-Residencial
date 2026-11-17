@@ -18,6 +18,14 @@ vi.mock('@/services', () => ({
     sincronizar: vi.fn(),
   },
   correosService: { listar: () => Promise.resolve({ total: 0, correos: [] }), detalle: vi.fn() },
+  solicitudesService: {
+    listar: () => Promise.resolve([]),
+    detalle: vi.fn(),
+    asignar: vi.fn(),
+    cambiarEstado: vi.fn(),
+    reclasificar: vi.fn(),
+    aceptarSugerencia: vi.fn(),
+  },
   usuariosService: { listar: () => Promise.resolve([]), agregar: vi.fn(), actualizar: vi.fn() },
 }));
 
@@ -272,6 +280,20 @@ describe('AppLayout', () => {
     montar('/app/uno/bandeja');
     expect(await screen.findByRole('heading', { name: /bandeja de correos/i })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /conectar buzón de gmail/i })).toBeInTheDocument();
+  });
+
+  it('la ruta solicitudes conecta SolicitudesPage para SOPORTE y ADMIN', async () => {
+    useSesion.setState({ sesion: sesionDe('SOPORTE', uno, [uno]) });
+    montar('/app/uno/solicitudes');
+    expect(await screen.findByRole('heading', { name: /solicitudes del conjunto/i })).toBeInTheDocument();
+    expect(screen.queryByText(/próximamente/i)).not.toBeInTheDocument();
+
+    cleanup();
+
+    useSesion.setState({ sesion: sesionDe('ADMIN', uno, [uno]) });
+    montar('/app/uno/solicitudes');
+    expect(await screen.findByRole('heading', { name: /solicitudes del conjunto/i })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /responsable/i })).toBeInTheDocument();
   });
 });
 
