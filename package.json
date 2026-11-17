@@ -18,9 +18,13 @@
     "api": "tsx apps/api/src/server.ts",
     "web": "cd apps/web && npm run dev --",
     "web:install": "cd apps/web && npm install",
-    "ia": "tsx apps/worker-ia/src/main.ts"
+    "ia": "tsx apps/worker-ia/src/main.ts",
+    "rn:entrenar": "tsx apps/red-neuronal/src/cli/entrenar.ts"
   },
   "dependencies": {
+    "@tensorflow/tfjs-backend-cpu": "^4.22.0",
+    "@tensorflow/tfjs-core": "^4.22.0",
+    "@tensorflow/tfjs-layers": "^4.22.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.12.8",
     "imapflow": "^2.10.0",

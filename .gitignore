@@ -22,3 +22,7 @@ opencode.jsonc
 
 # Salidas de compilación
 dist/
+
+# Red neuronal: el corpus trae correos (aunque enmascarados) y los modelos se entrenan con él. Nunca se versionan.
+data/
+modelos/
