@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import type sql from 'mssql';
 import { ConflictError, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
-import { detalleCorreo, estadoGateway, listarCorreos } from '../modules/consultas.js';
+import { detalleCorreo, estadoGateway, listarCorreos, listarSugerenciasPendientes } from '../modules/consultas.js';
 
 /**
  * API HTTP (inicio de S4). Por ahora SOLO LECTURA y sin login: escucha únicamente en 127.0.0.1 y el
@@ -60,6 +60,11 @@ export function construirApp({ pool, hostsPermitidos, registrarError = console.e
   });
 
   app.get('/api/correos/:id', async (req) => detalleCorreo(pool, Number((req.params as { id: string }).id)));
+
+  /** Cola de validación: sugerencias de IA por revisar. Aceptarlas es una escritura: llega con el login. */
+  app.get('/api/sugerencias', async (req) =>
+    listarSugerenciasPendientes(pool, { limite: numero((req.query as Record<string, unknown>).limite) }),
+  );
 
   app.get('/api/gateway/estado', async () => estadoGateway(pool));
 

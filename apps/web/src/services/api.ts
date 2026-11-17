@@ -61,6 +61,32 @@ export interface PaginaCorreos {
   correos: CorreoBuzon[];
 }
 
+/** Una entrada de la cola de validación: lo que dicen las reglas frente a lo que sugiere la IA. */
+export interface SugerenciaPendiente {
+  /** idCorreo: con él se pide el detalle a api.correo(). */
+  id: number;
+  idSolicitud: number;
+  codigo: string;
+  asunto: string | null;
+  remitente: string;
+  fechaRecepcion: string;
+  residente: string | null;
+  unidad: string | null;
+  categoria: string;
+  prioridad: string;
+  categoriaSugerida: string;
+  prioridadSugerida: string;
+  resumen: string;
+  justificacion: string | null;
+  proveedor: string;
+  modelo: string;
+}
+
+export interface PaginaSugerencias {
+  total: number;
+  sugerencias: SugerenciaPendiente[];
+}
+
 export interface EstadoGateway {
   cuentas: { cuenta: string; ultimoUid: number; actualizadoEn: string }[];
   totalCorreos: number;
@@ -110,6 +136,9 @@ export const api = {
   },
   correo(id: number, signal?: AbortSignal) {
     return pedir<DetalleCorreo>(`/api/correos/${id}`, signal);
+  },
+  sugerencias(signal?: AbortSignal) {
+    return pedir<PaginaSugerencias>('/api/sugerencias', signal);
   },
   estadoGateway(signal?: AbortSignal) {
     return pedir<EstadoGateway>('/api/gateway/estado', signal);

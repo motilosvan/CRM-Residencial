@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { crearPool } from '../db/pool.js';
 import { ingestarCorreo } from '../modules/ingesta.js';
+import { registrarSugerencia } from '../modules/sugerencias.js';
 import { construirApp } from './app.js';
 
 let db: TestDb;
@@ -67,6 +68,23 @@ describe('API · buzón', () => {
     const r = await get('/api/gateway/estado');
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ totalCorreos: 2, cuentas: [{ cuenta: 'buzon@gmail.com/INBOX', ultimoUid: 10 }] });
+  });
+
+  it('GET /api/sugerencias devuelve la cola de validación; parámetros inválidos ⇒ 422', async () => {
+    expect((await get('/api/sugerencias')).json()).toEqual({ total: 0, sugerencias: [] });
+
+    const { correos } = (await get('/api/correos?q=fuga')).json<{ correos: { idSolicitud: number }[] }>();
+    await registrarSugerencia(db.pool, {
+      idSolicitud: correos[0]!.idSolicitud, categoria: 'FACTURACION', prioridad: 'BAJA', resumen: 'Resumen de prueba',
+      proveedor: 'opencode-go', modelo: 'glm-5.3-flash',
+    });
+    const r = await get('/api/sugerencias?limite=10');
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({
+      total: 1,
+      sugerencias: [{ categoria: 'MANTENIMIENTO', categoriaSugerida: 'FACTURACION', resumen: 'Resumen de prueba', modelo: 'glm-5.3-flash' }],
+    });
+    expect((await get('/api/sugerencias?limite=abc')).statusCode).toBe(422);
   });
 });
 

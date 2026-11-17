@@ -253,7 +253,7 @@ export function InboxPage() {
   );
 }
 
-function EtiquetaCategoria({ categoria }: { categoria: string | null }) {
+export function EtiquetaCategoria({ categoria }: { categoria: string | null }) {
   const c = categoriaPanel(categoria);
   if (c) return <CategoryBadge categoria={c} />;
   if (!categoria) return null;

@@ -295,6 +295,75 @@ export async function detalleCorreo(
   );
 }
 
+export interface SugerenciaPendiente {
+  /** idCorreo: con él se pide el detalle a detalleCorreo. */
+  id: number;
+  idSolicitud: number;
+  codigo: string;
+  asunto: string | null;
+  remitente: string;
+  fechaRecepcion: Date;
+  residente: string | null;
+  unidad: string | null;
+  /** Clasificación vigente de la solicitud (reglas). */
+  categoria: string;
+  prioridad: string;
+  categoriaSugerida: string;
+  prioridadSugerida: string;
+  resumen: string;
+  justificacion: string | null;
+  proveedor: string;
+  modelo: string;
+}
+
+export const FiltroSugerenciasSchema = z.object({
+  limite: z.number().int().min(1).max(200).default(100),
+});
+export type FiltroSugerencias = z.input<typeof FiltroSugerenciasSchema>;
+
+/**
+ * Cola de validación: sugerencias listas de solicitudes que siguen NUEVAS, las más urgentes primero.
+ * "Pendiente de validación" sale de aquí: no es un estado de la solicitud.
+ */
+export async function listarSugerenciasPendientes(
+  pool: sql.ConnectionPool,
+  filtro: FiltroSugerencias = {},
+): Promise<{ total: number; sugerencias: SugerenciaPendiente[] }> {
+  const f = validar(FiltroSugerenciasSchema, filtro);
+  return withTx(
+    pool,
+    async (tx) => {
+      const filas = (
+        await tx
+          .request()
+          .input('lim', sql.Int, f.limite)
+          .query<SugerenciaPendiente & { total: number }>(
+            `SELECT TOP (@lim) c.idCorreo AS id, s.idSolicitud,
+                    'SOL-' + RIGHT('000000' + CAST(s.idSolicitud AS VARCHAR(10)), 6) AS codigo,
+                    c.asunto, c.remitente, c.fechaRecepcion, r.nombre AS residente, r.unidad,
+                    cat.nombre AS categoria, p.nombre AS prioridad,
+                    catSug.nombre AS categoriaSugerida, priSug.nombre AS prioridadSugerida,
+                    g.resumen, g.justificacion, g.proveedor, g.modelo, COUNT(*) OVER () AS total
+               FROM SUGERENCIAS_IA g
+               JOIN SOLICITUDES s ON s.idSolicitud = g.idSolicitud
+               JOIN CORREOS c ON c.idCorreo = s.idCorreo
+               JOIN ESTADOS e ON e.idEstado = s.idEstado
+               JOIN CATEGORIAS cat ON cat.idCategoria = s.idCategoria
+               JOIN PRIORIDADES p ON p.idPrioridad = s.idPrioridad
+               JOIN CATEGORIAS catSug ON catSug.idCategoria = g.idCategoria
+               JOIN PRIORIDADES priSug ON priSug.idPrioridad = g.idPrioridad
+               LEFT JOIN RESIDENTES r ON r.idResidente = c.idResidente
+              WHERE g.estado = 'LISTA' AND e.nombre = 'NUEVA'
+              ORDER BY priSug.peso DESC, c.fechaRecepcion, c.idCorreo`,
+          )
+      ).recordset;
+      const total = filas[0]?.total ?? 0;
+      return { total, sugerencias: filas.map(({ total: _total, ...fila }) => fila) };
+    },
+    { isolation: 'SNAPSHOT' },
+  );
+}
+
 export interface SolicitudParaSugerir {
   idSolicitud: number;
   asunto: string;

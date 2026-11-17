@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { setupTestDb, type TestDb } from '../../test/helpers/testDb.js';
 import { ValidationError } from '../errors.js';
 import { asignar } from './asignaciones.js';
-import { detalleCorreo, listarCorreos, solicitudesParaSugerir } from './consultas.js';
+import { detalleCorreo, listarCorreos, listarSugerenciasPendientes, solicitudesParaSugerir } from './consultas.js';
 import { ingestarCorreo } from './ingesta.js';
 import { registrarFalloSugerencia, registrarSugerencia } from './sugerencias.js';
 
@@ -155,6 +155,52 @@ describe('solicitudesParaSugerir', () => {
     );
     await asignar(db.pool, { idSolicitud: id, idResponsable: usuarios[1]!.id, idAsignador: usuarios[0]!.id, versionEsperada: 1 });
     expect(await pendientes()).toEqual([]);
+  });
+});
+
+describe('listarSugerenciasPendientes (cola de validación)', () => {
+  beforeEach(async () => {
+    await db.q('INSERT INTO SUGERENCIAS_IA (idSolicitud, estado, proveedor, modelo) SELECT idSolicitud, \'FALLIDA\', \'p\', \'m\' FROM SOLICITUDES');
+  });
+
+  it('muestra la clasificación por reglas junto a la sugerida, con las más urgentes primero', async () => {
+    const media = await nuevaSolicitud('Gotera en el techo');
+    const alta = await nuevaSolicitud('Hay humo en el pasillo');
+    await registrarSugerencia(db.pool, sugerencia(media));
+    await registrarSugerencia(db.pool, { ...sugerencia(alta), categoria: 'SEGURIDAD', prioridad: 'ALTA' });
+
+    const r = await listarSugerenciasPendientes(db.pool);
+    expect(r.total).toBe(2);
+    expect(r.sugerencias.map((s) => s.idSolicitud)).toEqual([alta, media]);
+    expect(r.sugerencias[1]).toMatchObject({
+      codigo: expect.stringMatching(/^SOL-\d{6}$/), asunto: 'Gotera en el techo', remitente: 'ana@mail.com', residente: 'Ana Pérez',
+      categoria: 'MANTENIMIENTO', categoriaSugerida: 'MANTENIMIENTO', prioridadSugerida: 'MEDIA',
+      resumen: 'Fuga de agua en el baño', proveedor: 'openrouter', modelo: base.modelo,
+    });
+    expect(r.sugerencias[0]).not.toHaveProperty('total');
+  });
+
+  it('excluye lo fallido, lo pendiente de reintento y lo que ya no está NUEVA', async () => {
+    const fallida = await nuevaSolicitud();
+    const reintento = await nuevaSolicitud();
+    const asignada = await nuevaSolicitud();
+    await registrarFalloSugerencia(db.pool, fallo(fallida, 1));
+    await registrarFalloSugerencia(db.pool, fallo(reintento));
+    await registrarSugerencia(db.pool, sugerencia(asignada));
+    expect((await listarSugerenciasPendientes(db.pool)).total).toBe(1);
+
+    const usuarios = await db.q<{ id: number }>('SELECT idUsuario AS id FROM USUARIOS ORDER BY idUsuario');
+    await asignar(db.pool, { idSolicitud: asignada, idResponsable: usuarios[1]!.id, idAsignador: usuarios[0]!.id, versionEsperada: 1 });
+    expect(await listarSugerenciasPendientes(db.pool)).toEqual({ total: 0, sugerencias: [] });
+  });
+
+  it('el total cuenta toda la cola aunque el límite recorte la lista; valida el filtro', async () => {
+    await registrarSugerencia(db.pool, sugerencia(await nuevaSolicitud()));
+    await registrarSugerencia(db.pool, sugerencia(await nuevaSolicitud()));
+    const r = await listarSugerenciasPendientes(db.pool, { limite: 1 });
+    expect(r.total).toBe(2);
+    expect(r.sugerencias).toHaveLength(1);
+    await expect(listarSugerenciasPendientes(db.pool, { limite: 0 })).rejects.toBeInstanceOf(ValidationError);
   });
 });
 
