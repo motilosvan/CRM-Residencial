@@ -110,6 +110,37 @@ Decisiones que afectan a las semanas siguientes:
 - **Sin campo de confianza:** el modelo no entrega una probabilidad calibrada, así que nada se aplica por umbral.
 - **Quién falla:** un límite de solicitudes (HTTP 429) pausa el ciclo; llave, modelo o política lo detienen; fallos temporales reintentan sin descontar; solo una respuesta inválida cuenta contra el correo.
 
+## Red neuronal propia  (requisito del curso)
+
+**Estado: RN-04 y RN-05 hechas** (representación del texto y red, en `apps/red-neuronal`). Falta el corpus etiquetado. Plan completo, con tareas RN-01 a RN-10, en [`plan-red-neuronal.md`](plan-red-neuronal.md). En resumen:
+
+- Una red neuronal entrenada por el equipo sugiere categoría y prioridad. Corre en el worker como un proveedor más (`IA_PROVEEDOR=local`), detrás de la interfaz `ProveedorIA`. T1, T7 y `SUGERENCIAS_IA` no cambian.
+- **Clasifica; no genera texto.** La justificación sale de las palabras que más pesaron en la decisión (oclusión). El resumen es la frase del correo que más sostiene esa decisión.
+- El cuello de botella es el corpus etiquetado: ≥ 500 correos, con un conjunto de prueba escrito por personas distintas de quienes escribieron las reglas.
+- Decidido: TensorFlow.js (núcleo, capas y CPU en JavaScript puro), no retropropagación a mano.
+
+## Detección de correos maliciosos  (adelanto, fuera del plan original)
+
+**Estado: hecho.** Reglas en `domain/seguridad.ts`, extracción de evidencia en `apps/gateway/src/evidencia.ts`, tabla `ANALISIS_SEGURIDAD` (migración `0007`). Decisiones:
+
+- **Marcar, no descartar ni poner en cuarentena** (regla 8). Cada correo recibe un nivel (BAJO, MEDIO ≥ 30 o ALTO ≥ 60) con las señales que lo explican. La solicitud se crea igual, y el panel muestra el aviso y qué hacer. Hay un filtro "Solo sospechosos" (`GET /api/correos?sospechosos=1`).
+- **T1 guarda el análisis en la misma transacción que el correo.** No existe un correo sin análisis; el paso `seguridad` está en la prueba de atomicidad. El análisis es inmutable (`crm_app` solo inserta) y lleva la versión de las reglas (`seg-1`). La BD exige nivel canónico, puntaje coherente con el nivel y señales en JSON válido.
+- **Reglas explicables, no un modelo.** Cada señal tiene un peso fijo y el puntaje es la suma; una señal repetida cuenta una vez. Una evidencia "buena" (SPF pass) nunca resta, así una cabecera falsificada no puede bajar el riesgo.
+- **Métodos de ataque cubiertos:**
+  - Suplantación: SPF/DKIM/DMARC fallidos, nombre visible institucional desde un correo gratuito o con otra dirección dentro, Reply-To hacia otro dominio.
+  - Enlaces engañosos: el texto muestra un dominio y lleva a otro; IP; acortadores; punycode (letras cirílicas); dominios que imitan a bancos y marcas de Colombia; TLD riesgosos.
+  - Adjuntos peligrosos: ejecutables, doble extensión, HTML, macros, y comprimidos con la contraseña escrita en el texto.
+  - Contenido: pedido de credenciales, amenaza de bloqueo, fraude de cambio de cuenta de pago.
+  - Inyección de instrucciones contra el modelo de IA.
+  - MIME ilegible, como técnica de evasión.
+- **Solo se cree la autenticación del servidor que recibió el correo.** Se toma la primera cabecera `Authentication-Results` de `mx.google.com`; las que agrega el remitente se ignoran.
+- **Sin falsos positivos en lo normal:** los 34 correos de ejemplo de residentes quedan en BAJO sin señales; una prueba lo vigila.
+- **Dos ReDoS corregidos (denegación de servicio con un correo).** La primera versión del extractor de enlaces tardaba 189 s con un HTML de miles de `<a href="x"` sin cerrar. `htmlATexto`, que ya existía en `parseo.ts`, tardaba 12 s con 280 KB de `<style ` (y crecía al cuadrado). Ambos son ahora recorridos lineales con `indexOf`, con pruebas de regresión de tiempo.
+- **Pendiente:**
+  - Los dominios propios del conjunto no se configuran todavía. Con ellos, "Administración" desde un dominio ajeno sería una señal más fuerte.
+  - El phishing por código QR en imágenes no se detecta.
+  - El worker de IA todavía envía al modelo los correos con inyección de instrucciones; por ahora la señal solo advierte a la persona.
+
 ## Semana 4 — API y autenticación  (hito M4)
 
 | ID | Tarea | Agente | Aceptación |

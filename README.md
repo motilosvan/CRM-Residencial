@@ -20,16 +20,18 @@ El foco del proyecto es la **base de datos transaccional** (SQL Server): las reg
 
 | Funcionalidad | Estado |
 |---|---|
-| Base de datos transaccional (migraciones 0002–0005, triggers, rol de mínimo privilegio) | Hecho |
+| Base de datos transaccional (migraciones 0002–0007, triggers, rol de mínimo privilegio) | Hecho |
 | Ingesta idempotente de correos (T1) + checkpoint IMAP (T6) | Hecho |
 | Clasificación y priorización automáticas | Hecho (reglas por palabras clave) |
 | Asignar / reasignar (T2), cambiar estado (T3), reclasificar (T4) | Hecho |
 | Consultas de bandeja, buzón, detalle e indicadores (lectura consistente SNAPSHOT) | Hecho |
 | Email Gateway con Gmail por IMAP (S3) | Hecho |
 | API HTTP de solo lectura para el buzón (Fastify, inicio de S4) | Hecho, sin login todavía |
-| Panel React/Vite: buzón unificado con datos reales | Hecho; las demás pantallas siguen con datos simulados |
+| Panel React/Vite: buzón unificado y cola de validación con datos reales | Hecho; las demás pantallas siguen con datos simulados |
 | Sugerencias de IA vía OpenRouter u OpenCode Go (worker aparte, solo sugiere) | Hecho, apagado por defecto; aceptarlas llega con el login |
-| 311 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
+| Detección de correos maliciosos: phishing, suplantación, fraude de pago, adjuntos peligrosos, inyección a la IA (migración 0007) | Hecho; marca y advierte, no descarta |
+| Red neuronal propia para las sugerencias (requisito del curso) | En curso: red y entrenamiento hechos, falta el corpus |
+| 382 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
 | Visor local de demostración | Provisional |
 | Login y rutas de escritura en la API (S4), resto del panel conectado (S5) | Pendiente |
 
@@ -54,7 +56,7 @@ npm install
 npm run web:install         # dependencias del panel (apps/web)
 docker compose up -d db     # SQL Server, solo accesible desde este equipo
 npm run db:migrate          # crea la BD, aplica migraciones y el login de la aplicación
-npm run gate                # migraciones + lint + tipos + 311 pruebas
+npm run gate                # migraciones + lint + tipos + 382 pruebas
 ```
 
 ### Ver el buzón unificado de Gmail
@@ -91,7 +93,7 @@ antivirus el análisis de IMAP. Nunca use `NODE_TLS_REJECT_UNAUTHORIZED=0`: expo
 
 El worker `npm run ia` toma las solicitudes NUEVAS, enmascara el texto en el servidor, pide una sugerencia al
 modelo y la guarda aparte en `SUGERENCIAS_IA`. **Solo sugiere:** nunca cambia una solicitud, y si está apagado
-o el modelo falla, todo sigue funcionando con la clasificación por reglas. La bandeja muestra la sugerencia y el
+o el modelo falla, todo sigue funcionando con la clasificación por reglas. La bandeja y la cola de validación muestran la sugerencia y el
 texto exacto que recibe el modelo.
 
 1. Elija proveedor y cree la llave: [OpenRouter](https://openrouter.ai/keys) (gratis, pero sus modelos gratuitos
