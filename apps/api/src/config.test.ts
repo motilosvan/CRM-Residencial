@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accesoConfigFromEnv } from './config.js';
+import { accesoConfigFromEnv, hostsImapPermitidosFromEnv } from './config.js';
 
 const SECRETO = 'x'.repeat(32);
 const base = { AUTH_SECRETO: SECRETO };
@@ -83,5 +83,30 @@ describe('API · accesoConfigFromEnv', () => {
   it('ADMIN_INICIAL_CORREO se normaliza a minúsculas y se valida', () => {
     expect(accesoConfigFromEnv({ ...base, ADMIN_INICIAL_CORREO: ' Admin@Mail.com ' }).adminInicialCorreo).toBe('admin@mail.com');
     expect(() => accesoConfigFromEnv({ ...base, ADMIN_INICIAL_CORREO: 'sin-arroba' })).toThrow(/ADMIN_INICIAL_CORREO/);
+  });
+});
+
+describe('API · hostsImapPermitidosFromEnv', () => {
+  it('por defecto solo imap.gmail.com; una variable vacía cuenta como no definida', () => {
+    expect(hostsImapPermitidosFromEnv({})).toEqual(new Set(['imap.gmail.com']));
+    expect(hostsImapPermitidosFromEnv({ IMAP_HOSTS_PERMITIDOS: '  ' })).toEqual(new Set(['imap.gmail.com']));
+  });
+
+  it('lista separada por comas, recortada y en minúsculas', () => {
+    expect(hostsImapPermitidosFromEnv({ IMAP_HOSTS_PERMITIDOS: ' IMAP.Gmail.com , outlook.office365.com,,' })).toEqual(
+      new Set(['imap.gmail.com', 'outlook.office365.com']),
+    );
+  });
+
+  it('un valor que no es nombre de servidor lanza; el error nombra la variable y no el valor', () => {
+    for (const malo of ['imap.gmail.com:993', 'http://imap.x.com', 'host con espacio', ',,']) {
+      try {
+        hostsImapPermitidosFromEnv({ IMAP_HOSTS_PERMITIDOS: malo });
+        expect.unreachable();
+      } catch (e) {
+        expect((e as Error).message).toMatch(/IMAP_HOSTS_PERMITIDOS/);
+        if (malo.trim().replace(/,/g, '')) expect((e as Error).message).not.toContain(malo);
+      }
+    }
   });
 });

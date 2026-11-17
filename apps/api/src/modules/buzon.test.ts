@@ -153,7 +153,7 @@ describe('Buzón · filtro por conjunto', () => {
     expect(n.totalCorreos).toBe(2);
     expect(n.cuentas).toEqual([expect.objectContaining({ cuenta: 'norte@demo.mailflow.test', ultimoUid: 5 })]);
     expect(n.ultimoCorreo).toEqual(new Date(Date.UTC(2026, 9, 1, 12) + 240_000));
-    expect(await estadoGateway(db.pool, vacio)).toEqual({ cuentas: [], totalCorreos: 0, ultimoCorreo: null });
+    expect(await estadoGateway(db.pool, vacio)).toEqual({ cuentas: [], totalCorreos: 0, ultimoCorreo: null, conectado: false, buzon: null });
   });
 
   it('idConjunto inválido ⇒ ValidationError', async () => {

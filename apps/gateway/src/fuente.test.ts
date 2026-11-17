@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ConfigGateway } from './config.js';
+import type { ConexionBuzon } from '../../api/src/modules/buzones.js';
 import { ErrorDescarga, esRechazoDelMensaje, FuenteImap } from './fuente.js';
 
 /**
@@ -13,14 +13,19 @@ const imap = vi.hoisted(() => ({
   falloLogout: null as Error | null,
   falloFetch: null as Error | null,
   sinBuzon: false,
+  opcionesCandado: [] as { readOnly?: boolean }[],
+  auth: [] as { user: string; pass: string }[],
+  opciones: [] as Record<string, unknown>[],
 }));
 
 vi.mock('imapflow', () => ({
   ImapFlow: class {
     mailbox: unknown = false;
     private readonly s = { logouts: 0, closes: 0, liberada: false };
-    constructor() {
+    constructor(opciones: { auth: { user: string; pass: string } } & Record<string, unknown>) {
       imap.sesiones.push(this.s);
+      imap.auth.push(opciones.auth);
+      imap.opciones.push(opciones);
     }
     on() {
       return this;
@@ -28,7 +33,8 @@ vi.mock('imapflow', () => ({
     async connect() {
       if (imap.falloConnect) throw imap.falloConnect;
     }
-    async getMailboxLock() {
+    async getMailboxLock(_buzon: string, opciones: { readOnly?: boolean }) {
+      imap.opcionesCandado.push(opciones);
       if (imap.falloLock) throw imap.falloLock;
       if (!imap.sinBuzon) this.mailbox = { uidValidity: 7n, uidNext: 12 };
       return { release: () => void (this.s.liberada = true) };
@@ -47,10 +53,8 @@ vi.mock('imapflow', () => ({
   },
 }));
 
-const cfg: ConfigGateway = {
-  host: 'imap.prueba', port: 993, usuario: 'buzon@gmail.com', contrasena: 'x', buzon: 'INBOX',
-  cuenta: 'buzon@gmail.com/INBOX', intervaloS: 45, diasIniciales: 7, maxPorCiclo: 50, maxIntentos: 3, marcarLeido: false,
-  conjuntoSlug: 'parque-central-occidente',
+const cfg: ConexionBuzon = {
+  host: 'imap.prueba', port: 993, usuario: 'buzon@demo.mailflow.test', contrasena: 'x', buzon: 'INBOX',
 };
 
 /** Una sesión quedó cerrada si se pidió LOGOUT (o, si este falló, se cortó el socket). */
@@ -60,9 +64,34 @@ beforeEach(() => {
   imap.sesiones.length = 0;
   imap.falloConnect = imap.falloLock = imap.falloLogout = imap.falloFetch = null;
   imap.sinBuzon = false;
+  imap.opcionesCandado.length = 0;
+  imap.auth.length = 0;
+  imap.opciones.length = 0;
 });
 
 describe('Gateway · FuenteImap abre y cierra la sesión', () => {
+  it('se conecta con los datos del buzón y abre la carpeta en solo lectura salvo que se marquen leídos', async () => {
+    const f = new FuenteImap(cfg);
+    await f.abrir();
+    await f.cerrar();
+    const g = new FuenteImap(cfg, { marcarLeido: true });
+    await g.abrir();
+    await g.cerrar();
+    expect(imap.auth).toEqual([{ user: 'buzon@demo.mailflow.test', pass: 'x' }, { user: 'buzon@demo.mailflow.test', pass: 'x' }]);
+    expect(imap.opcionesCandado).toEqual([{ readOnly: true }, { readOnly: false }]);
+  });
+
+  it('esperaMs acota conexión, saludo y socket; sin él se conservan los valores por defecto de imapflow', async () => {
+    const f = new FuenteImap(cfg, { esperaMs: 15_000 });
+    await f.abrir();
+    await f.cerrar();
+    const g = new FuenteImap(cfg);
+    await g.abrir();
+    await g.cerrar();
+    expect(imap.opciones[0]).toMatchObject({ connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000 });
+    for (const k of ['connectionTimeout', 'greetingTimeout', 'socketTimeout']) expect(imap.opciones[1]).not.toHaveProperty(k);
+  });
+
   it('ciclo normal: abre el buzón y al cerrar libera el candado y hace LOGOUT una sola vez', async () => {
     const f = new FuenteImap(cfg);
     expect(await f.abrir()).toEqual({ uidValidity: 7, uidNext: 12 });

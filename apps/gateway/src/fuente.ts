@@ -1,5 +1,5 @@
 import { ImapFlow } from 'imapflow';
-import type { ConfigGateway } from './config.js';
+import type { ConexionBuzon } from '../../api/src/modules/buzones.js';
 
 /** Un mensaje tal como está en el servidor (RFC 822 crudo). */
 export interface MensajeCrudo {
@@ -79,7 +79,15 @@ export class FuenteImap implements FuenteCorreo {
   private cliente: ImapFlow | null = null;
   private liberar: (() => void) | null = null;
 
-  constructor(private readonly cfg: ConfigGateway) {}
+  /**
+   * `marcarLeido` falso (por defecto) abre la carpeta en solo lectura. `esperaMs` acota la conexión, el
+   * saludo y la inactividad del socket (la prueba al conectar un buzón usa 15 s); sin él rigen los
+   * valores de imapflow (90 s, 16 s y 5 min), que son los del ciclo normal.
+   */
+  constructor(
+    private readonly cfg: ConexionBuzon,
+    private readonly opciones: { marcarLeido?: boolean; esperaMs?: number } = {},
+  ) {}
 
   private get c(): ImapFlow {
     if (!this.cliente) throw new Error('FuenteImap: abrir() no se ha llamado');
@@ -93,6 +101,9 @@ export class FuenteImap implements FuenteCorreo {
       secure: true,
       auth: { user: this.cfg.usuario, pass: this.cfg.contrasena },
       logger: false,
+      ...(this.opciones.esperaMs !== undefined
+        ? { connectionTimeout: this.opciones.esperaMs, greetingTimeout: this.opciones.esperaMs, socketTimeout: this.opciones.esperaMs }
+        : {}),
     });
     // Sin este listener, un error de socket en segundo plano tumbaría el proceso; la operación en curso falla igual.
     cliente.on('error', () => {});
@@ -100,13 +111,13 @@ export class FuenteImap implements FuenteCorreo {
     try {
       await cliente.connect();
       // Si no se marcan leídos, el buzón se abre en solo lectura (EXAMINE): el gateway no altera Gmail.
-      const lock = await cliente.getMailboxLock(this.cfg.buzon, { readOnly: !this.cfg.marcarLeido });
+      const lock = await cliente.getMailboxLock(this.cfg.buzon, { readOnly: !this.opciones.marcarLeido });
       this.liberar = () => lock.release();
       const mb = cliente.mailbox;
       if (!mb) throw new Error(`No se pudo abrir el buzón ${this.cfg.buzon}`);
       return { uidValidity: Number(mb.uidValidity), uidNext: mb.uidNext };
     } catch (err) {
-      // Ya autenticado pero sin buzón (IMAP_MAILBOX mal escrito...): sin esto la sesión quedaba abierta en
+      // Ya autenticado pero sin buzón (carpeta mal escrita...): sin esto la sesión quedaba abierta en
       // cada ciclo y Gmail, que admite unas 15 por cuenta, terminaba rechazando todas las conexiones.
       await this.cerrar();
       throw err;

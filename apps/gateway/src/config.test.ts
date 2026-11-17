@@ -1,43 +1,44 @@
 import { describe, expect, it } from 'vitest';
 import { cargarConfig } from './config.js';
 
-const base = { IMAP_USER: 'Admin@Gmail.com', IMAP_APP_PASSWORD: 'abcd efgh ijkl mnop' };
+const SECRETO = 'secreto-de-pruebas-con-más-de-32-caracteres';
+const base = { AUTH_SECRETO: SECRETO };
 
 describe('Gateway · cargarConfig', () => {
-  it('aplica valores por defecto, quita espacios a la contraseña de aplicación y arma la cuenta usuario/buzón', () => {
-    const c = cargarConfig(base);
-    expect(c).toMatchObject({
-      host: 'imap.gmail.com', port: 993, usuario: 'admin@gmail.com', contrasena: 'abcdefghijklmnop',
-      buzon: 'INBOX', cuenta: 'admin@gmail.com/INBOX', intervaloS: 45, diasIniciales: 7,
-      maxPorCiclo: 50, maxIntentos: 3, marcarLeido: false,
-    });
+  it('aplica valores por defecto y toma el secreto con el que se descifran los buzones', () => {
+    expect(cargarConfig(base)).toEqual({ secreto: SECRETO, intervaloS: 45, maxPorCiclo: 50, maxIntentos: 3 });
   });
 
-  it('una variable vacía (IMAP_USER= en .env) cuenta como faltante y el error la nombra', () => {
-    expect(() => cargarConfig({ ...base, IMAP_USER: '' })).toThrow(/IMAP_USER/);
-    expect(() => cargarConfig({ IMAP_USER: 'a@b.co' })).toThrow(/IMAP_APP_PASSWORD/);
-    expect(cargarConfig({ ...base, IMAP_HOST: '' }).host).toBe('imap.gmail.com');
+  it('ya no exige credenciales IMAP en el entorno: los buzones viven en la BD', () => {
+    expect(() => cargarConfig(base)).not.toThrow();
+    const c = cargarConfig({ ...base, IMAP_USER: 'viejo@demo.mailflow.test', IMAP_APP_PASSWORD: 'x' }) as unknown as Record<string, unknown>;
+    expect(Object.keys(c).sort()).toEqual(['intervaloS', 'maxIntentos', 'maxPorCiclo', 'secreto']);
   });
 
-  it('el mensaje de error nunca incluye el valor de la contraseña', () => {
+  it('AUTH_SECRETO es obligatorio (≥ 32); una variable vacía cuenta como faltante y el error la nombra sin su valor', () => {
+    expect(() => cargarConfig({})).toThrow(/AUTH_SECRETO/);
+    expect(() => cargarConfig({ AUTH_SECRETO: '' })).toThrow(/AUTH_SECRETO/);
     try {
-      cargarConfig({ ...base, IMAP_APP_PASSWORD: 'secreto-xyz', IMAP_PORT: 'no-numero' });
+      cargarConfig({ AUTH_SECRETO: 'corto-xyz' });
       expect.unreachable();
     } catch (e) {
-      expect((e as Error).message).toMatch(/IMAP_PORT/);
-      expect((e as Error).message).not.toContain('secreto-xyz');
+      expect((e as Error).message).toMatch(/AUTH_SECRETO/);
+      expect((e as Error).message).not.toContain('corto-xyz');
     }
   });
 
-  it('valida rangos y booleanos', () => {
+  it('valida rangos y el error nunca incluye el secreto', () => {
     expect(() => cargarConfig({ ...base, IMAP_INTERVALO_S: '1' })).toThrow(/IMAP_INTERVALO_S/);
-    expect(() => cargarConfig({ ...base, IMAP_MARCAR_LEIDO: 'si' })).toThrow(/IMAP_MARCAR_LEIDO/);
-    expect(cargarConfig({ ...base, IMAP_MARCAR_LEIDO: 'true' }).marcarLeido).toBe(true);
-  });
-
-  it('el conjunto del buzón sale de IMAP_CONJUNTO_SLUG; por defecto, el inicial', () => {
-    expect(cargarConfig(base).conjuntoSlug).toBe('parque-central-occidente');
-    expect(cargarConfig({ ...base, IMAP_CONJUNTO_SLUG: ' torres-del-norte ' }).conjuntoSlug).toBe('torres-del-norte');
-    expect(() => cargarConfig({ ...base, IMAP_CONJUNTO_SLUG: 'Con Espacios' })).toThrow(/IMAP_CONJUNTO_SLUG/);
+    expect(() => cargarConfig({ ...base, IMAP_MAX_INTENTOS: '0' })).toThrow(/IMAP_MAX_INTENTOS/);
+    try {
+      cargarConfig({ ...base, IMAP_MAX_POR_CICLO: 'no-numero' });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as Error).message).toMatch(/IMAP_MAX_POR_CICLO/);
+      expect((e as Error).message).not.toContain(SECRETO);
+    }
+    expect(cargarConfig({ ...base, IMAP_INTERVALO_S: '60', IMAP_MAX_POR_CICLO: '10', IMAP_MAX_INTENTOS: '5' })).toMatchObject({
+      intervaloS: 60, maxPorCiclo: 10, maxIntentos: 5,
+    });
   });
 });

@@ -4,6 +4,7 @@ import type sql from 'mssql';
 import { ConflictError, ErrorAcceso, Forbidden, NotFound, TransicionInvalida, ValidationError } from '../errors.js';
 import { solicitarCodigo, verificarCodigo, type DepsAcceso } from '../modules/acceso.js';
 import { asignar } from '../modules/asignaciones.js';
+import { desconectarBuzon, guardarBuzon, sincronizarConjunto, type DepsBuzon } from '../modules/buzones.js';
 import { listarConjuntos } from '../modules/conjuntos.js';
 import {
   detalleCorreo,
@@ -24,7 +25,7 @@ import { aceptarSugerencia } from '../modules/sugerencias.js';
  * API HTTP. Las rutas protegidas exigen sesión (cookie `mailflow_sesion`, httpOnly) y operan sobre
  * el conjunto activo de la sesión; públicas: `/api/salud`, `GET /api/conjuntos`, `/api/auth/codigo` y
  * `/api/auth/verificar`. Escucha solo en 127.0.0.1 y el panel la consume por el proxy de Vite (sin CORS).
- * Los POST rechazan un `Origin` ajeno.
+ * Los POST y PUT rechazan un `Origin` ajeno.
  */
 
 declare module 'fastify' {
@@ -45,6 +46,11 @@ export interface OpcionesApp {
     /** Orígenes aceptados en los POST (p. ej. `http://localhost:5173`). */
     origenesPermitidos: ReadonlySet<string>;
   };
+  /**
+   * Conexión IMAP del buzón por conjunto, inyectada por la raíz de composición (`server.ts`). Sin ella
+   * no se registran las rutas `/api/buzon*`.
+   */
+  buzon?: DepsBuzon;
   /** Límite de peticiones por IP para las rutas de acceso OTP (opcional; recomendado en producción). */
   limitePeticiones?: { max: number; ventanaMs: number; ahora?: () => number };
   /** Para errores 500: recibe solo tipo y código, nunca el mensaje (puede traer datos personales). */
@@ -106,7 +112,7 @@ function crearLimitadorIp(cfg?: OpcionesApp['limitePeticiones']) {
   };
 }
 
-export function construirApp({ pool, hostsPermitidos, acceso, limitePeticiones, registrarError = console.error }: OpcionesApp): FastifyInstance {
+export function construirApp({ pool, hostsPermitidos, acceso, buzon, limitePeticiones, registrarError = console.error }: OpcionesApp): FastifyInstance {
   const { cookieSegura, origenesPermitidos, ...deps } = acceso;
   const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
   void app.register(fastifyCookie);
@@ -174,6 +180,21 @@ export function construirApp({ pool, hostsPermitidos, acceso, limitePeticiones, 
   app.get('/api/correos/:id', protegida, async (req) => detalleCorreo(pool, req.sesion.idConjuntoActivo, Number((req.params as { id: string }).id)));
 
   app.get('/api/gateway/estado', protegida, async (req) => estadoGateway(pool, req.sesion.idConjuntoActivo));
+
+  if (buzon) {
+    /** Conecta o reconecta el buzón del conjunto activo (ADMIN). Prueba IMAP antes de guardar. */
+    app.put('/api/buzon', protegida, async (req) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      return guardarBuzon(pool, buzon, actorDe(req.sesion), { ...b, versionEsperada: versionDe(b) } as never);
+    });
+
+    app.post('/api/buzon/desconectar', protegida, async (req) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      return desconectarBuzon(pool, actorDe(req.sesion), { versionEsperada: versionDe(b) as number | undefined });
+    });
+
+    app.post('/api/buzon/sincronizar', protegida, async (req) => sincronizarConjunto(pool, buzon, actorDe(req.sesion)));
+  }
 
   app.get('/api/solicitudes', protegida, async (req) => {
     const q = req.query as Record<string, unknown>;

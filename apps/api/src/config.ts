@@ -124,4 +124,22 @@ export function accesoConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Acces
   return { secreto, smtp, adminInicialCorreo, cookieSegura: env.COOKIE_SEGURA === 'true', origenes, desarrollo };
 }
 
+const HOST_VALIDO = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
+
+/**
+ * Servidores IMAP a los que un ADMIN puede conectar el buzón de su conjunto (IMAP_HOSTS_PERMITIDOS,
+ * lista separada por comas; por defecto solo `imap.gmail.com`). Sin esta lista, un ADMIN podría usar la
+ * prueba de conexión para abrir conexiones desde el servidor a hosts y puertos internos.
+ * El error nombra la variable, nunca su valor.
+ */
+export function hostsImapPermitidosFromEnv(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
+  const crudo = opcional(env, 'IMAP_HOSTS_PERMITIDOS');
+  if (crudo === undefined) return new Set(['imap.gmail.com']);
+  const hosts = crudo.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+  if (hosts.length === 0 || hosts.some((h) => h.length > 120 || !HOST_VALIDO.test(h))) {
+    throw new Error('IMAP_HOSTS_PERMITIDOS inválido (lista de nombres de servidor separados por comas, sin puerto ni protocolo)');
+  }
+  return new Set(hosts);
+}
+
 export { NOMBRE_BD_VALIDO };

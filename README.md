@@ -65,11 +65,14 @@ npm run gate                # migraciones + lint + tipos + 311 pruebas
 1. En la cuenta de Gmail, active la verificación en 2 pasos y cree una
    [contraseña de aplicación](https://myaccount.google.com/apppasswords).
    Es mejor usar una cuenta dedicada al conjunto, no un correo personal: todo lo que se lee se guarda en la BD.
-2. Complete `IMAP_USER` e `IMAP_APP_PASSWORD` en `.env`.
+2. Defina `AUTH_SECRETO` en `.env` (lo comparten la API y el gateway: con él se cifran las contraseñas de buzón).
+   El buzón ya no va en `.env`: el ADMIN de cada conjunto lo conecta con `PUT /api/buzon`
+   (`correo`, `contrasena` y, opcionales, `imapHost`, `imapPort`, `buzon`, `diasIniciales`, `marcarLeido`).
+   La API prueba la conexión IMAP antes de guardar y guarda la contraseña cifrada en `BUZONES_CONJUNTO`.
 3. En tres terminales:
 
 ```bash
-npm run gateway             # lee Gmail cada 45 s y crea las solicitudes (Ctrl+C para detener)
+npm run gateway             # recorre los buzones activos cada 45 s y crea las solicitudes (Ctrl+C para detener)
 npm run api                 # API en http://127.0.0.1:3000/api
 npm run web:legacy          # panel anterior en http://localhost:5173 → menú "Bandeja Gmail"
 ```
@@ -77,9 +80,10 @@ npm run web:legacy          # panel anterior en http://localhost:5173 → menú 
 `npm run web` abre el panel MailFlow nuevo (`apps/web`), que hoy usa servicios simulados; el buzón real vuelve en F2.
 Ambos usan el puerto 5173 por defecto: no los ejecute a la vez.
 
-La primera lectura de una cuenta trae solo los correos de los últimos `IMAP_DIAS_INICIALES` días (7 por defecto).
-Por defecto el gateway abre el buzón en solo lectura y no marca nada como leído (`IMAP_MARCAR_LEIDO`).
-Para probar las credenciales con una sola lectura: `npm run gateway -- --una-vez`.
+La primera lectura de un buzón trae solo los correos de los últimos `diasIniciales` días (7 por defecto).
+Por defecto el gateway abre el buzón en solo lectura y no marca nada como leído (`marcarLeido`).
+Para probar los buzones con una sola lectura: `npm run gateway -- --una-vez` (sale con 1 si alguno falló), o
+`POST /api/buzon/sincronizar` desde la API. Si se cambia `AUTH_SECRETO`, hay que volver a conectar cada buzón.
 
 **Error `SELF_SIGNED_CERT_IN_CHAIN`:** un antivirus con análisis de correo (Avast, AVG…) o un proxy intercepta la
 conexión cifrada con Gmail. Node no usa los certificados de Windows, así que hay que indicarle el del antivirus

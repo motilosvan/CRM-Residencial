@@ -1,20 +1,21 @@
 /**
- * EMAIL GATEWAY (S3). Proceso aparte que lee el buzón de Gmail por IMAP cada IMAP_INTERVALO_S segundos
- * y convierte cada correo nuevo en una solicitud (T1 + checkpoint T6 en la misma transacción).
+ * EMAIL GATEWAY (S3). Proceso aparte que, cada IMAP_INTERVALO_S segundos, recorre los buzones activos de
+ * dbo.BUZONES_CONJUNTO (uno por conjunto, conectados por el ADMIN desde el panel) y convierte cada correo
+ * nuevo en una solicitud (T1 + checkpoint T6 en la misma transacción).
  *
  *   npm run gateway               # ciclo continuo (Ctrl+C para detener)
- *   npm run gateway -- --una-vez  # un solo ciclo (útil para probar las credenciales)
+ *   npm run gateway -- --una-vez  # un solo ciclo (útil para probar los buzones); sale con 1 si alguno falló
  *
- * Usa la identidad de la APLICACIÓN (DB_USER, rol crm_app), nunca la del migrador.
- * Requiere la BD migrada (`npm run db:migrate`).
+ * Usa la identidad de la APLICACIÓN (DB_USER, rol crm_app), nunca la del migrador. Necesita AUTH_SECRETO
+ * (el mismo de la API) para descifrar las contraseñas de los buzones. Requiere la BD migrada.
+ * Los logs identifican cada buzón por idConjunto: nunca muestran su dirección ni el contenido de los correos.
  */
 import { dbConfigFromEnv } from '../../api/src/config.js';
 import { crearPool } from '../../api/src/db/pool.js';
-import { NotFound } from '../../api/src/errors.js';
-import { idConjuntoPorSlug } from '../../api/src/modules/conjuntos.js';
+import { crearAdaptadorBuzon } from './adaptadorBuzon.js';
+import { cicloBuzones } from './ciclo.js';
 import { cargarConfig, type ConfigGateway } from './config.js';
-import { esErrorDeAutenticacion, esErrorDeCertificado, FuenteImap } from './fuente.js';
-import { describirError, ErrorSincronizacion, Intentos, sincronizar } from './sincronizar.js';
+import { describirError } from './sincronizar.js';
 
 const unaVez = process.argv.includes('--una-vez');
 const hora = () => new Date().toISOString().slice(11, 19);
@@ -29,17 +30,9 @@ try {
 }
 
 const pool = await crearPool(dbConfigFromEnv(), { max: 2 });
+const adaptador = crearAdaptadorBuzon({ maxPorCiclo: cfg.maxPorCiclo, maxIntentos: cfg.maxIntentos, log });
+const deps = { secreto: cfg.secreto, ejecutarSincronizacion: adaptador.ejecutarSincronizacion };
 
-let idConjunto: number;
-try {
-  idConjunto = await idConjuntoPorSlug(pool, cfg.conjuntoSlug);
-} catch (err) {
-  if (!(err instanceof NotFound)) throw err;
-  console.error(`No existe un conjunto activo con slug "${cfg.conjuntoSlug}". Revise IMAP_CONJUNTO_SLUG en .env.`);
-  await pool.close();
-  process.exit(1);
-}
-const intentos = new Intentos();
 let detener = false;
 let despertar: (() => void) | null = null;
 for (const senal of ['SIGINT', 'SIGTERM'] as const) {
@@ -50,43 +43,27 @@ for (const senal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-log(`Leyendo ${cfg.cuenta} (conjunto ${cfg.conjuntoSlug}) en ${cfg.host}:${cfg.port} cada ${cfg.intervaloS}s` +
-  ` (primera lectura: últimos ${cfg.diasIniciales} días; marcar leídos: ${cfg.marcarLeido ? 'sí' : 'no'})`);
+log(`Recorriendo los buzones activos de la BD cada ${cfg.intervaloS}s`);
+let avisadoSinBuzones = false;
 
 while (!detener) {
   let hayMas = false;
   try {
-    const r = await sincronizar(pool, new FuenteImap(cfg), {
-      cuenta: cfg.cuenta,
-      idConjunto,
-      diasIniciales: cfg.diasIniciales,
-      maxPorCiclo: cfg.maxPorCiclo,
-      maxIntentos: cfg.maxIntentos,
-      marcarLeido: cfg.marcarLeido,
-      log,
-    }, intentos);
-    if (r.revisados > 0 || unaVez) {
-      log(`Revisados ${r.revisados}: ${r.nuevos} nuevos, ${r.duplicados} ya estaban, ${r.respaldos} sin clasificar` +
-        (r.pendientes ? ' (quedan más, sigue de inmediato)' : ''));
+    const r = await cicloBuzones(pool, deps, { log, detallado: unaVez });
+    if (r.buzones === 0) {
+      // Una sola vez hasta que aparezca alguno: no se llena el log cada 45 s.
+      if (!avisadoSinBuzones || unaVez) {
+        log('No hay buzones activos: el ADMIN de cada conjunto lo conecta desde el panel. Se revisa en cada ciclo.');
+      }
+      avisadoSinBuzones = true;
+    } else {
+      avisadoSinBuzones = false;
     }
+    if (r.fallidos > 0 && unaVez) process.exitCode = 1;
     hayMas = r.pendientes;
   } catch (err) {
-    if (esErrorDeAutenticacion(err)) {
-      console.error('Gmail rechazó el inicio de sesión. Revise IMAP_USER e IMAP_APP_PASSWORD en .env: debe ser una ' +
-        '"contraseña de aplicación" (https://myaccount.google.com/apppasswords), no la contraseña normal de la cuenta.');
-      process.exitCode = 1;
-      break;
-    }
-    if (esErrorDeCertificado(err)) {
-      console.error('No se pudo verificar el certificado de Gmail: algo intercepta la conexión cifrada (un antivirus con ' +
-        'análisis de correo, como Avast/AVG, o un proxy). Indique a Node el certificado raíz de ese programa con ' +
-        'NODE_EXTRA_CA_CERTS (ver README) o desactive el análisis de IMAP en el antivirus. No desactive la verificación TLS.');
-      process.exitCode = 1;
-      break;
-    }
-    // Solo tipo y código: el mensaje completo de un error SQL puede traer datos del correo.
-    const detalle = err instanceof ErrorSincronizacion ? err.message : describirError(err);
-    log(`Ciclo interrumpido: ${detalle}.${unaVez ? '' : ` Se reintenta en ${cfg.intervaloS}s.`}`);
+    // No se pudo leer la lista de buzones (BD caída...). Solo tipo y código.
+    log(`Ciclo interrumpido: ${describirError(err)}.${unaVez ? '' : ` Se reintenta en ${cfg.intervaloS}s.`}`);
     if (unaVez) process.exitCode = 1;
   }
   if (unaVez && !hayMas) break;

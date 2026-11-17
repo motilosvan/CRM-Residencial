@@ -386,7 +386,24 @@ export async function leerCheckpoint(
   );
 }
 
-/** Estado del gateway de un conjunto para el panel: sus cuentas leídas, último avance y volumen del buzón. */
+/** Configuración pública del buzón IMAP del conjunto: jamás incluye la contraseña cifrada. */
+export interface BuzonPublico {
+  correo: string;
+  imapHost: string;
+  imapPort: number;
+  buzon: string;
+  diasIniciales: number;
+  marcarLeido: boolean;
+  activo: boolean;
+  ultimaSincronizacion: Date | null;
+  ultimoError: string | null;
+  version: number;
+}
+
+/**
+ * Estado del gateway de un conjunto para el panel: sus cuentas leídas, último avance, volumen del buzón
+ * y la configuración pública del buzón (`conectado` = hay buzón activo).
+ */
 export async function estadoGateway(pool: sql.ConnectionPool, idConjunto: number) {
   const conj = validar(IdConjuntoSchema, idConjunto);
   return withTx(
@@ -400,7 +417,7 @@ export async function estadoGateway(pool: sql.ConnectionPool, idConjunto: number
             'SELECT cuenta, ultimoUid, actualizadoEn FROM GATEWAY_CHECKPOINT WHERE idConjunto = @idConjunto ORDER BY cuenta',
           )
       ).recordset.map((c) => ({ ...c, ultimoUid: Number(c.ultimoUid) }));
-      const buzon = (
+      const volumen = (
         await tx
           .request()
           .input('idConjunto', sql.Int, conj)
@@ -408,7 +425,19 @@ export async function estadoGateway(pool: sql.ConnectionPool, idConjunto: number
             'SELECT COUNT(*) AS totalCorreos, MAX(fechaRecepcion) AS ultimoCorreo FROM CORREOS WHERE idConjunto = @idConjunto',
           )
       ).recordset[0]!;
-      return { cuentas, ...buzon };
+      // Columnas explícitas: contrasenaCifrada nunca sale de la BD por esta consulta.
+      const config =
+        (
+          await tx
+            .request()
+            .input('idConjunto', sql.Int, conj)
+            .query<BuzonPublico>(
+              `SELECT correo, imapHost, imapPort, buzon, diasIniciales, marcarLeido, activo, ultimaSincronizacion,
+                      ultimoError, version
+                 FROM BUZONES_CONJUNTO WHERE idConjunto = @idConjunto`,
+            )
+        ).recordset[0] ?? null;
+      return { cuentas, ...volumen, conectado: config?.activo === true, buzon: config };
     },
     { isolation: 'SNAPSHOT' },
   );
