@@ -2,44 +2,20 @@
   "name": "crm-residencial",
   "version": "0.2.0",
   "private": true,
-  "type": "module",
-  "description": "SOC-CRM: Sistema Organizador de Correos y Capa CRM Residencial",
-  "engines": {
-    "node": ">=20"
-  },
+  "description": "SOC-CRM: Sistema Organizador de Correos y Capa CRM Residencial (backend/ + frontend/)",
+  "engines": { "node": ">=20" },
   "scripts": {
-    "db:migrate": "tsx apps/api/src/db/migrate-cli.ts",
-    "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "gate": "npm run db:migrate && npm run lint && npm run typecheck && npm run test",
-    "demo": "tsx apps/api/src/demo/server.ts",
-    "gateway": "tsx apps/gateway/src/main.ts",
-    "api": "tsx apps/api/src/server.ts",
-    "web": "cd apps/web && npm run dev --",
-    "web:install": "cd apps/web && npm install",
-    "web:legacy": "cd apps/web-legacy && npm run dev --",
-    "ia": "tsx apps/worker-ia/src/main.ts"
-  },
-  "dependencies": {
-    "@fastify/cookie": "^11.1.5",
-    "dotenv": "^16.4.5",
-    "fastify": "^5.12.8",
-    "imapflow": "^2.10.0",
-    "mailparser": "^3.14.1",
-    "mssql": "^11.0.1",
-    "nodemailer": "^10.5.0",
-    "zod": "^4.6.7"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.17.0",
-    "@types/mssql": "^9.1.5",
-    "@types/node": "^22.10.0",
-    "@types/nodemailer": "^8.0.2",
-    "eslint": "^9.17.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "typescript-eslint": "^8.18.0",
-    "vitest": "^2.1.8"
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "db:migrate": "npm --prefix backend run db:migrate",
+    "lint": "npm --prefix backend run lint",
+    "typecheck": "npm --prefix backend run typecheck",
+    "test": "npm --prefix backend test",
+    "gate": "npm --prefix backend run gate",
+    "demo": "npm --prefix backend run demo",
+    "gateway": "npm --prefix backend run gateway",
+    "api": "npm --prefix backend run api",
+    "ia": "npm --prefix backend run ia",
+    "web": "npm --prefix frontend run dev --",
+    "web:install": "npm --prefix frontend install"
   }
 }

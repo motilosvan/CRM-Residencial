@@ -2,7 +2,7 @@
 
 Backlog ejecutable por agentes. Cada tarea tiene ID, alcance, agente responsable y **criterio de aceptación verificable**. Una tarea está terminada cuando `npm run gate` pasa y `@reviewer` aprueba el diff.
 
-> **Nota sobre el panel (2026-11-14):** el panel cambia de alcance. El nuevo panel MailFlow (`apps/web`) se rige por [`docs/plan-mailflow-f1.md`](plan-mailflow-f1.md) y la entrevista [`docs/mailflow-entrevista.md`](mailflow-entrevista.md); la fase F1 (landing, login, layout y tema por conjunto) está hecha con servicios simulados. Las semanas 4 y 5 de este plan, en lo que toca al panel, deben leerse contra ese documento. El panel anterior queda en `apps/web-legacy` hasta F4.
+> **Nota sobre el panel (2026-11-14):** el panel cambia de alcance. El nuevo panel MailFlow (`frontend`) se rige por [`docs/plan-mailflow-f1.md`](plan-mailflow-f1.md) y la entrevista [`docs/mailflow-entrevista.md`](mailflow-entrevista.md); la fase F1 (landing, login, layout y tema por conjunto) está hecha con servicios simulados. Las semanas 4 y 5 de este plan, en lo que toca al panel, deben leerse contra ese documento. El panel anterior queda en `frontend-legacy` hasta F4.
 
 ## Brecha entre la línea base y el MVP
 
@@ -48,14 +48,14 @@ Máquina de estados: `NUEVA → ASIGNADA → EN_PROCESO → RESUELTA → CERRADA
 | ID | Tarea | Agente | Aceptación |
 |---|---|---|---|
 | S1-01 | Andamiaje Node/TS: `package.json`, `tsconfig`, Vitest, ESLint, scripts `db:migrate`, `lint`, `typecheck`, `test`, `gate` | `tx-engineer` | `npm run gate` corre (aunque haya 1 test trivial) |
-| S1-02 | Runner de migraciones: aplica `ScriptBaseDatosCRM.sql` y `db/migrations/*.sql` en orden, registra en tabla `__MIGRACIONES`, idempotente | `db-architect` | Correrlo 2 veces no falla ni duplica |
+| S1-02 | Runner de migraciones: aplica `ScriptBaseDatosCRM.sql` y `backend/db/migrations/*.sql` en orden, registra en tabla `__MIGRACIONES`, idempotente | `db-architect` | Correrlo 2 veces no falla ni duplica |
 | S1-03 | Migración `0002_integridad.sql`: todas las brechas de la tabla de arriba + semillas (categorías, prioridades, estados, transiciones) | `db-architect` | Aplica sobre BD limpia y sobre BD con datos de la línea base |
 | S1-04 | `withTx()` con aislamiento configurable y reintento en 1205/3960 | `tx-engineer` | Test: forzar deadlock ⇒ reintenta y termina |
 | S1-05 | Tests de constraints: FK, `UNIQUE(messageId)`, índice filtrado de asignación, trigger de historial, `CHECK` de prioridad/rol | `qa` | Cada constraint tiene un test que prueba el rechazo |
 
 ## Semana 2 — Núcleo transaccional  (hito M2)
 
-**Estado: S2-01 a S2-06 completas** (140 pruebas al cierre de S2; 180 tras la auditoría). Código en `apps/api/src/{domain,modules}`.
+**Estado: S2-01 a S2-06 completas** (140 pruebas al cierre de S2; 180 tras la auditoría). Código en `backend/api/src/{domain,modules}`.
 Decisiones a tener presentes:
 - Las reglas de clasificación y urgencia viven en código (`domain/`), no en BD; el plan original las ponía en una tabla editable.
 - `ASIGNADA` solo se alcanza con `asignar()` (T2), nunca con `cambiarEstado()`: así no existe una solicitud ASIGNADA sin responsable. Desasignar (`→ NUEVA`) sí pasa por T3 y libera la asignación.
@@ -77,7 +77,7 @@ Auditoría con agentes especializados (BD, transacciones, seguridad, arquitectur
 
 Decisiones que afectan a las semanas siguientes:
 - **Dos identidades de BD:** migrador (`DB_MIGRATOR_*`) y aplicación (`DB_USER`, rol `crm_app`). La API y el gateway usan solo la de la aplicación.
-- **El gateway (S3) es un proceso aparte que importa `apps/api/src/modules`** y llama a `ingestarCorreo` (no pasa por HTTP, porque S3 va antes que S4). Debe procesar en orden de UID; un correo que falle N veces se ingesta como `SIN_CLASIFICAR` antes de avanzar el checkpoint.
+- **El gateway (S3) es un proceso aparte que importa `backend/api/src/modules`** y llama a `ingestarCorreo` (no pasa por HTTP, porque S3 va antes que S4). Debe procesar en orden de UID; un correo que falle N veces se ingesta como `SIN_CLASIFICAR` antes de avanzar el checkpoint.
 - **Toda escritura exige `versionEsperada`** (también asignar). Las lecturas para la API salen de `modules/consultas.ts`.
 - **S4:** los módulos pasarán a recibir `actor: { idUsuario, rol }` y la autorización ("SOPORTE solo sus asignadas") se evaluará dentro de la transacción, no en las rutas.
 - **S5:** el panel lo sirve la API (mismo origen) y toma estados/categorías del modelo, no de listas propias (`js/app.js` hoy usa otro vocabulario).
@@ -85,14 +85,14 @@ Decisiones que afectan a las semanas siguientes:
 
 ## Semana 3 — Email Gateway  (hito M3)
 
-**Estado: S3-01 a S3-03 completas** (229 pruebas en total). Código en `apps/gateway`. Decisiones:
+**Estado: S3-01 a S3-03 completas** (229 pruebas en total). Código en `backend/gateway`. Decisiones:
 
 - La fuente IMAP está detrás de la interfaz `FuenteCorreo`. Las pruebas usan un buzón en memoria contra SQL Server real, en lugar de un servidor IMAP simulado. El caso borde `UID n:*` tiene su propia prueba.
 - La primera lectura de una cuenta se limita a `IMAP_DIAS_INICIALES`; nunca se trae todo el historial. La clave del checkpoint es `usuario/carpeta`, porque los UID son por carpeta.
 - Marcar leído es opcional (`IMAP_MARCAR_LEIDO`, apagado por defecto). Si está apagado, el buzón se abre en solo lectura.
 - Los fallos de infraestructura (BD caída, corte de IMAP) no cuentan como intento: solo los fallos propios del correo llevan al respaldo `SIN_CLASIFICAR` (T1 con `sinClasificar`).
 - Un correo que falla siempre no puede bloquear el buzón (se procesa en orden). La escalada tiene tres pasos: tras `IMAP_MAX_INTENTOS` fallos se guarda `SIN_CLASIFICAR` con todos los datos. Si aun así falla, se guarda un registro mínimo: Message-ID, valores del gateway y los datos originales como texto. Si el servidor se niega a entregar un mensaje (FETCH `NO`/`BAD`), tras `IMAP_MAX_INTENTOS` rechazos se registra sin contenido, con un Message-ID estable derivado de cuenta, UIDVALIDITY y UID.
-- Por adelantado de S4/S5: API Fastify de **solo lectura** (`/api/correos`, `/api/correos/:id`, `/api/gateway/estado`) y la pantalla del buzón en `apps/web` conectada a ella. El frontend de `main` (React/Vite) vive en `apps/web` con su propio `package.json`.
+- Por adelantado de S4/S5: API Fastify de **solo lectura** (`/api/correos`, `/api/correos/:id`, `/api/gateway/estado`) y la pantalla del buzón en `frontend` conectada a ella. El frontend de `main` (React/Vite) vive en `frontend` con su propio `package.json`.
 
 | ID | Tarea | Agente | Aceptación |
 |---|---|---|---|
@@ -102,7 +102,7 @@ Decisiones que afectan a las semanas siguientes:
 
 ## Sugerencias de IA  (adelanto, fuera del plan original)
 
-**Estado: hecho hasta mostrar la sugerencia; aceptarla depende de S4-01.** Código en `apps/worker-ia`, T7 en `modules/sugerencias.ts`, migración `0006`. Decisiones:
+**Estado: hecho hasta mostrar la sugerencia; aceptarla depende de S4-01.** Código en `backend/worker-ia`, T7 en `modules/sugerencias.ts`, migración `0006`. Decisiones:
 
 - **La IA queda fuera de T1.** Un worker aparte llama al modelo fuera de toda transacción, porque tarda segundos y `withTx` puede repetir su función. El correo siempre conserva la clasificación por reglas (regla 8).
 - **Solo sugiere.** Escribe en `SUGERENCIAS_IA`, nunca en `SOLICITUDES`: no altera `version` ni historial. Aceptar será T4, con `versionEsperada`. "Pendiente de validación" saldrá de esa tabla, sin estados nuevos.
@@ -124,7 +124,7 @@ Decisiones que afectan a las semanas siguientes:
 
 ## Semana 5 — Panel y reportes  (hito M5)
 
-**Estado:** S5-01 completo en el backend (`generarReporte`, `reporteACsv` y `GET /api/reportes` en `SNAPSHOT`, por conjunto y rol `ADMIN`). Faltan S5-02 y S5-03 en el panel (`apps/web`).
+**Estado:** S5-01 completo en el backend (`generarReporte`, `reporteACsv` y `GET /api/reportes` en `SNAPSHOT`, por conjunto y rol `ADMIN`). Faltan S5-02 y S5-03 en el panel (`frontend`).
 
 | ID | Tarea | Agente | Aceptación |
 |---|---|---|---|

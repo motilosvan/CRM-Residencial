@@ -11,7 +11,7 @@ Arquitectura en **tres capas** (presentación, lógica de negocio, datos) más u
                            │ IMAP (S3)
                  ┌─────────▼─────────┐
                  │  Email Gateway    │  proceso aparte; llama a T1 en el mismo proceso
-                 └─────────┬─────────┘  (importa apps/api/src/modules)
+                 └─────────┬─────────┘  (importa backend/api/src/modules)
                            │
  Administrador /  ┌────────▼───────────────────────────────┐
  Soporte ─HTTPS──►│ API (Fastify, S4) + panel estático (S5) │  mismo origen (cookie httpOnly)
@@ -33,12 +33,12 @@ Arquitectura en **tres capas** (presentación, lógica de negocio, datos) más u
 
 | Capa | Carpeta | Contenido |
 |---|---|---|
-| Presentación | `index.html`, `css/`, `js/` (S5); hoy `apps/api/src/demo/` | Panel; el visor demo es provisional |
-| Lógica de negocio | `apps/api/src/domain/` | Clasificador, priorizador, máquina de estados (sin BD) |
-| Lógica de negocio | `apps/api/src/modules/` | Transacciones T1–T4 y consultas |
-| Acceso a datos | `apps/api/src/db/` | `withTx`, pool, migraciones, login de la app |
-| Datos | SQL Server + `db/migrations/` | Esquema, restricciones, triggers, permisos |
-| Integración | `apps/gateway/` (S3) | Lectura IMAP → T1 |
+| Presentación | `index.html`, `css/`, `js/` (S5); hoy `backend/api/src/demo/` | Panel; el visor demo es provisional |
+| Lógica de negocio | `backend/api/src/domain/` | Clasificador, priorizador, máquina de estados (sin BD) |
+| Lógica de negocio | `backend/api/src/modules/` | Transacciones T1–T4 y consultas |
+| Acceso a datos | `backend/api/src/db/` | `withTx`, pool, migraciones, login de la app |
+| Datos | SQL Server + `backend/db/migrations/` | Esquema, restricciones, triggers, permisos |
+| Integración | `backend/gateway/` (S3) | Lectura IMAP → T1 |
 
 ## 4. Decisiones (ADR resumidos)
 
@@ -55,7 +55,7 @@ Arquitectura en **tres capas** (presentación, lógica de negocio, datos) más u
 | 9 | Panel servido por la API (mismo origen) | Cookies `httpOnly` sin CORS | Abrir `index.html` como archivo |
 | 10 | Multi-conjunto en la BD y acceso por código OTP por correo (B1) | El conjunto es la frontera de los datos (`idConjunto` en las tablas y membresía en `USUARIO_CONJUNTOS`); el acceso no usa contraseña: un código de 6 dígitos por correo, con solo su HMAC guardado. Motivo no escrito en la entrevista; ver `docs/mailflow-backend-entrevista.md` | Login con contraseña (argon2, previsto en S4-01) |
 | 11 | Buzón IMAP por conjunto en la BD (`BUZONES_CONJUNTO`, 0008) con la contraseña de aplicación cifrada (AES-256-GCM, clave HKDF-SHA256 de `AUTH_SECRETO`, info `mailflow-buzon-imap-v1`; se guarda IV ‖ tag ‖ texto). El ADMIN lo conecta desde la API tras una prueba IMAP en vivo, y el gateway recorre todos los buzones activos | Cada conjunto trae su propia cuenta sin tocar `.env` ni reiniciar procesos; GCM detecta un blob manipulado o una clave distinta en vez de devolver basura | Credenciales `IMAP_*` en `.env` (un solo buzón por despliegue); OAuth2 de Google (alcance restringido: caduca en modo Testing y exige verificación CASA) |
-| 12 | La conexión IMAP llega inyectada a la API (`DepsBuzon`): `modules/` y `http/` nunca importan `apps/gateway` ni `imapflow`; solo `server.ts` (raíz de composición) cablea `apps/gateway/src/adaptadorBuzon.ts` | El gateway ya depende de la API (ADR 8); la dependencia inversa crearía un ciclo y ataría las pruebas de la API a IMAP (se prueban con dobles) | Mover `FuenteImap` a `apps/api` (la API cargaría imapflow y la lógica del ciclo) |
+| 12 | La conexión IMAP llega inyectada a la API (`DepsBuzon`): `modules/` y `http/` nunca importan `backend/gateway` ni `imapflow`; solo `server.ts` (raíz de composición) cablea `backend/gateway/src/adaptadorBuzon.ts` | El gateway ya depende de la API (ADR 8); la dependencia inversa crearía un ciclo y ataría las pruebas de la API a IMAP (se prueban con dobles) | Mover `FuenteImap` a `backend/api` (la API cargaría imapflow y la lógica del ciclo) |
 | 13 | Servidores IMAP en lista blanca (`IMAP_HOSTS_PERMITIDOS`, por defecto solo `imap.gmail.com`) y solo el puerto 993: `guardarBuzon` responde 422 antes de abrir cualquier conexión | La prueba de conexión la dispara un ADMIN desde la API: con host y puerto libres, el servidor serviría para abrir conexiones a hosts y puertos internos (SSRF) | Host y puerto libres (cualquier servidor IMAP sin configurar nada) |
 
 **Notas a los ADR 11 y 12.**
@@ -76,12 +76,12 @@ Ver la sección 5 de [`estudio-funcionalidad-y-bd-transaccional.md`](estudio-fun
 
 ## 6. Frontend MailFlow
 
-El panel `apps/web` se rehace como MailFlow (multi-conjunto, solo personal). Spec: [`mailflow-entrevista.md`](mailflow-entrevista.md); plan de F1: [`plan-mailflow-f1.md`](plan-mailflow-f1.md). Decisiones de implementación (React Router en modo datos, `tsconfig` único, `culori`, sesión en `localStorage`) están en la sección «Decisiones mías» de ese plan.
+El panel `frontend` se rehace como MailFlow (multi-conjunto, solo personal). Spec: [`mailflow-entrevista.md`](mailflow-entrevista.md); plan de F1: [`plan-mailflow-f1.md`](plan-mailflow-f1.md). Decisiones de implementación (React Router en modo datos, `tsconfig` único, `culori`, sesión en `localStorage`) están en la sección «Decisiones mías» de ese plan.
 
-- Servicios definidos como interfaces, con implementación simulada en `apps/web/src/services/mock` y cliente `fetch` en `services/http` (B1). Con `VITE_USAR_MOCK=1` o en las pruebas se usa el mock.
+- Servicios definidos como interfaces, con implementación simulada en `frontend/src/services/mock` y cliente `fetch` en `services/http` (B1). Con `VITE_USAR_MOCK=1` o en las pruebas se usa el mock.
 - Tema por conjunto: sobrescribe las variables CSS de shadcn en `<html>`; si la paleta del conjunto no cumple AA, se usa la de MailFlow.
 - Solo modo claro. Esto elimina el modo oscuro de la entrevista (decisión 16) y no reescribe ningún ADR de esta tabla.
-- El panel anterior vive en `apps/web-legacy` como referencia hasta F4.
+- El panel anterior vive en `frontend-legacy` como referencia hasta F4.
 
 Objeciones abiertas (no bloquean F1; se argumentan antes de F2):
 

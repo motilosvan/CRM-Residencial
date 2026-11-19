@@ -27,8 +27,8 @@ El foco del proyecto es la **base de datos transaccional** (SQL Server): las reg
 | Consultas de bandeja, buzón, detalle e indicadores (lectura consistente SNAPSHOT) | Hecho |
 | Email Gateway con Gmail por IMAP (S3) | Hecho |
 | API HTTP de solo lectura para el buzón (Fastify, inicio de S4) | Hecho, sin login todavía |
-| Panel anterior (`apps/web-legacy`): buzón unificado con datos reales | Hecho; sus demás pantallas siguen con datos simulados |
-| Panel MailFlow (`apps/web`, F1): landing, inicio de sesión con código de un solo uso, layout y tema por conjunto | Hecho con servicios simulados; buzón real en F2 |
+| Panel anterior (`frontend (retirado)`): buzón unificado con datos reales | Hecho; sus demás pantallas siguen con datos simulados |
+| Panel MailFlow (`frontend`, F1): landing, inicio de sesión con código de un solo uso, layout y tema por conjunto | Hecho con servicios simulados; buzón real en F2 |
 | Sugerencias de IA vía OpenRouter u OpenCode Go (worker aparte, solo sugiere) | Hecho, apagado por defecto; aceptarlas llega con el login |
 | 311 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
 | Visor local de demostración | Provisional |
@@ -44,7 +44,7 @@ Panel MailFlow (multi-conjunto, solo personal): [`docs/mailflow-entrevista.md`](
 - **Node.js 20+ y TypeScript** — lógica de negocio (`mssql`, `zod`) y API HTTP (`fastify`).
 - **imapflow + mailparser** — Email Gateway que lee Gmail por IMAP.
 - **OpenRouter u OpenCode Go** (opcional) — modelo para las sugerencias de clasificación.
-- **React 19 + Vite 7 + Tailwind 4 + shadcn/ui** (`apps/web`) — panel MailFlow: multi-conjunto, solo personal, con React Router 7, TanStack Query, Zustand y Zod. El panel anterior sigue en `apps/web-legacy` hasta la fase F4.
+- **React 19 + Vite 7 + Tailwind 4 + shadcn/ui** (`frontend`) — panel MailFlow: multi-conjunto, solo personal, con React Router 7, TanStack Query, Zustand y Zod. El panel anterior sigue en `frontend (retirado)` hasta la fase F4.
 - **Vitest** — pruebas de integración contra SQL Server real.
 
 ## ▶️ Ejecución local
@@ -54,7 +54,7 @@ Requisitos: Docker Desktop y Node.js 20 o superior.
 ```bash
 cp .env.example .env        # y reemplazar cada <cambiar> por una contraseña propia
 npm install
-npm run web:install         # dependencias del panel (apps/web)
+npm run web:install         # dependencias del panel (frontend)
 docker compose up -d db     # SQL Server, solo accesible desde este equipo
 npm run db:migrate          # crea la BD, aplica migraciones y el login de la aplicación
 npm run gate                # migraciones + lint + tipos + 311 pruebas
@@ -77,7 +77,7 @@ npm run api                 # API en http://127.0.0.1:3000/api
 npm run web:legacy          # panel anterior en http://localhost:5173 → menú "Bandeja Gmail"
 ```
 
-`npm run web` abre el panel MailFlow nuevo (`apps/web`), que hoy usa servicios simulados; el buzón real vuelve en F2.
+`npm run web` abre el panel MailFlow nuevo (`frontend`), que hoy usa servicios simulados; el buzón real vuelve en F2.
 Ambos usan el puerto 5173 por defecto: no los ejecute a la vez.
 
 La primera lectura de un buzón trae solo los correos de los últimos `diasIniciales` días (7 por defecto).
@@ -130,18 +130,18 @@ revise la Ley 1581 con quien corresponda: el texto sale del país hacia un terce
 ```text
 CRM-Residencial/
 ├── ScriptBaseDatosCRM.sql          # línea base del modelo relacional (no se edita)
-├── db/migrations/                  # 0002 … 0006: integridad, fechas, invariantes, rol de la app, sugerencias de IA
-├── apps/api/src/
+├── backend/db/migrations/                  # 0002 … 0006: integridad, fechas, invariantes, rol de la app, sugerencias de IA
+├── backend/api/src/
 │   ├── domain/                     # clasificador, priorizador, enmascarado, máquina de estados (puro)
 │   ├── modules/                    # transacciones T1–T4 y consultas
 │   ├── db/                         # withTx, pool, migraciones, login de la app
 │   ├── http/, server.ts            # API HTTP (Fastify), hoy solo lectura
 │   └── demo/                       # visor provisional
-├── apps/api/test/                  # utilidades y datos solo de pruebas
-├── apps/gateway/                   # Email Gateway IMAP (Gmail) → T1 + checkpoint T6
-├── apps/worker-ia/                 # worker de sugerencias de IA (OpenRouter, OpenCode Go)
-├── apps/web/                       # panel MailFlow: React 19 + Vite 7 + Tailwind 4 (proyecto npm propio)
-├── apps/web-legacy/                # panel anterior, referencia hasta F4
+├── backend/api/test/                  # utilidades y datos solo de pruebas
+├── backend/gateway/                   # Email Gateway IMAP (Gmail) → T1 + checkpoint T6
+├── backend/worker-ia/                 # worker de sugerencias de IA (OpenRouter, OpenCode Go)
+├── frontend/                       # panel MailFlow: React 19 + Vite 7 + Tailwind 4 (proyecto npm propio)
+├── frontend (retirado)/                # panel anterior, referencia hasta F4
 ├── docs/                           # plan, estudio, arquitectura, alcance
 └── docker-compose.yml, .env.example
 ```

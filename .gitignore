@@ -22,3 +22,17 @@ graphify-out/
 
 # Salidas de compilación
 dist/
+
+# Más configuración local de herramientas de IA / agentes
+.agents/
+.superpowers/
+.env.bak-*
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.gitmodules
+.ripgreprc
+coverage/

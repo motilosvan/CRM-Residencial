@@ -1,0 +1,42 @@
+{
+  "name": "crm-residencial",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "SOC-CRM: Sistema Organizador de Correos y Capa CRM Residencial",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "db:migrate": "tsx api/src/db/migrate-cli.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "gate": "npm run db:migrate && npm run lint && npm run typecheck && npm run test",
+    "demo": "tsx api/src/demo/server.ts",
+    "gateway": "tsx gateway/src/main.ts",
+    "api": "tsx api/src/server.ts",
+    "ia": "tsx worker-ia/src/main.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.12.8",
+    "imapflow": "^2.10.0",
+    "mailparser": "^3.14.1",
+    "mssql": "^11.0.1",
+    "nodemailer": "^10.5.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/mssql": "^9.1.5",
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^8.0.2",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,41 @@
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  { ignores: ['node_modules/**', 'dist/**', 'coverage/**'] },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    files: ['**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    // Regla del proyecto: el dominio es puro (sin BD, sin driver, sin servidor).
+    files: ['api/src/domain/**/*.ts'],
+    ignores: ['api/src/domain/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: ['../db/*', '../modules/*', '../demo/*', 'mssql', 'fastify', 'node:*'] },
+      ],
+    },
+  },
+  {
+    // Regla 3: SQL siempre parametrizado. Una plantilla con ${...} pasada a .query()/.batch() en código
+    // de producción es sospechosa (en pruebas se permite para preparar datos).
+    files: ['api/src/**/*.ts'],
+    ignores: ['api/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Se permiten constantes de módulo en MAYÚSCULAS (fragmentos SQL fijos, p. ej. BANDEJA).
+          selector: "CallExpression[callee.property.name=/^(query|batch)$/] > TemplateLiteral[expressions.length>0] > :expression:not(Identifier[name=/^[A-Z][A-Z0-9_]*$/])",
+          message: 'SQL con interpolación: use request.input(...) (regla del proyecto).',
+        },
+      ],
+    },
+  },
+);
