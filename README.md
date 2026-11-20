@@ -1,6 +1,6 @@
 # Sistema Organizador de Correos & CRM Residencial (SOC-CRM)
 
-![Estado](https://img.shields.io/badge/estado-MVP%20en%20desarrollo%20(S1%E2%80%93S2)-4e9292)
+![Estado](https://img.shields.io/badge/estado-MVP%20funcional%20(Olas%201%E2%80%933)-4e9292)
 ![Versión](https://img.shields.io/badge/versión-0.2.0-123e46)
 ![Tecnologías](https://img.shields.io/badge/tecnologías-SQL%20Server%20%7C%20Node.js%20%7C%20TypeScript-orange)
 
@@ -16,27 +16,30 @@ El foco del proyecto es la **base de datos transaccional** (SQL Server): las reg
 - Mensajes urgentes mezclados con la correspondencia rutinaria.
 - Demoras en la atención y ningún indicador de gestión.
 
-## ✅ Estado actual (semanas 1 a 3 del plan)
+## ✅ Estado actual
+
+Backend y panel MailFlow completos según [`docs/plan-mailflow-f2-f4-produccion.md`](docs/plan-mailflow-f2-f4-produccion.md) (tres olas, rama `mailflow-f2-f4`). El repositorio se separó en `backend/` y `frontend/` y el panel anterior se retiró.
 
 | Funcionalidad | Estado |
 |---|---|
-| Base de datos transaccional (migraciones 0002–0005, triggers, rol de mínimo privilegio) | Hecho |
+| Base de datos transaccional (migraciones 0002–0008, triggers, rol de mínimo privilegio `crm_app`) | Hecho |
 | Ingesta idempotente de correos (T1) + checkpoint IMAP (T6) | Hecho |
 | Clasificación y priorización automáticas | Hecho (reglas por palabras clave) |
-| Asignar / reasignar (T2), cambiar estado (T3), reclasificar (T4) | Hecho |
-| Consultas de bandeja, buzón, detalle e indicadores (lectura consistente SNAPSHOT) | Hecho |
-| Email Gateway con Gmail por IMAP (S3) | Hecho |
-| API HTTP de solo lectura para el buzón (Fastify, inicio de S4) | Hecho, sin login todavía |
-| Panel anterior (`frontend (retirado)`): buzón unificado con datos reales | Hecho; sus demás pantallas siguen con datos simulados |
-| Panel MailFlow (`frontend`, F1): landing, inicio de sesión con código de un solo uso, layout y tema por conjunto | Hecho con servicios simulados; buzón real en F2 |
-| Sugerencias de IA vía OpenRouter u OpenCode Go (worker aparte, solo sugiere) | Hecho, apagado por defecto; aceptarlas llega con el login |
-| 311 pruebas automáticas contra SQL Server real + pruebas de mutación | Hecho |
+| Asignar / reasignar (T2), cambiar estado (T3), reclasificar (T4), aceptar sugerencia de IA (T7→T4) | Hecho, con autorización por rol y aislamiento por conjunto dentro de la transacción |
+| Reportes (T5) con descarga CSV, bitácora de auditoría y laboratorio de pruebas de IA | Hecho |
+| Multi-conjunto: login con código de un solo uso (OTP) por correo, sesión por cookie, límite por IP | Hecho |
+| Buzón Gmail por conjunto en la BD (contraseña cifrada AES-256-GCM) y gateway multi-buzón | Hecho |
+| Administración: usuarios, residentes, identidad del conjunto (paleta con validación AA) y catálogos | Hecho, con control de versión (`409`) y auditoría |
+| Panel MailFlow (`frontend/`): Inicio, Bandeja, Solicitudes, Validación, Residentes, Usuarios, Identidad, Catálogos, Reportes, Auditoría y Laboratorio IA | Hecho, conectado a la API (modo simulado con `VITE_USAR_MOCK=1`) |
+| Sugerencias de IA vía OpenRouter u OpenCode Go (worker aparte, solo sugiere) | Hecho, apagado por defecto |
+| 604 pruebas de backend contra SQL Server real + 530 del panel + pruebas de mutación | Hecho |
 | Visor local de demostración | Provisional |
-| Login y rutas de escritura en la API (S4), resto del panel conectado (S5) | Pendiente |
+| Flujo de atención de `SOPORTE`, evidencias y notificaciones SMTP | Diseñado: [`docs/plan-flujo-soporte-evidencias.md`](docs/plan-flujo-soporte-evidencias.md) |
+| Pruebas con correos reales y de carga, backup y restauración, CI | Pendiente |
 
 Detalle y justificación: [`docs/estudio-funcionalidad-y-bd-transaccional.md`](docs/estudio-funcionalidad-y-bd-transaccional.md) · Plan: [`docs/plan-desarrollo.md`](docs/plan-desarrollo.md) · Arquitectura: [`docs/arquitectura.md`](docs/arquitectura.md).
 
-Panel MailFlow (multi-conjunto, solo personal): [`docs/mailflow-entrevista.md`](docs/mailflow-entrevista.md) · Plan F1: [`docs/plan-mailflow-f1.md`](docs/plan-mailflow-f1.md).
+Panel MailFlow (multi-conjunto, solo personal): [`docs/mailflow-entrevista.md`](docs/mailflow-entrevista.md) · [`docs/mailflow-backend-entrevista.md`](docs/mailflow-backend-entrevista.md) · Planes: [F1](docs/plan-mailflow-f1.md), [B1](docs/plan-mailflow-b1.md) y [F2–F4 a producción](docs/plan-mailflow-f2-f4-produccion.md).
 
 ## 🛠️ Tecnologías
 
@@ -44,7 +47,7 @@ Panel MailFlow (multi-conjunto, solo personal): [`docs/mailflow-entrevista.md`](
 - **Node.js 20+ y TypeScript** — lógica de negocio (`mssql`, `zod`) y API HTTP (`fastify`).
 - **imapflow + mailparser** — Email Gateway que lee Gmail por IMAP.
 - **OpenRouter u OpenCode Go** (opcional) — modelo para las sugerencias de clasificación.
-- **React 19 + Vite 7 + Tailwind 4 + shadcn/ui** (`frontend`) — panel MailFlow: multi-conjunto, solo personal, con React Router 7, TanStack Query, Zustand y Zod. El panel anterior sigue en `frontend (retirado)` hasta la fase F4.
+- **React 19 + Vite 7 + Tailwind 4 + shadcn/ui** (`frontend`) — panel MailFlow: multi-conjunto, solo personal, con React Router 7, TanStack Query, Zustand y Zod.
 - **Vitest** — pruebas de integración contra SQL Server real.
 
 ## ▶️ Ejecución local
@@ -54,10 +57,10 @@ Requisitos: Docker Desktop y Node.js 20 o superior.
 ```bash
 cp .env.example .env        # y reemplazar cada <cambiar> por una contraseña propia
 npm install
-npm run web:install         # dependencias del panel (frontend)
+npm run install:all         # dependencias del backend (backend/) y del panel (frontend/)
 docker compose up -d db     # SQL Server, solo accesible desde este equipo
 npm run db:migrate          # crea la BD, aplica migraciones y el login de la aplicación
-npm run gate                # migraciones + lint + tipos + 311 pruebas
+npm run gate                # migraciones + lint + tipos + 604 pruebas
 ```
 
 ### Ver el buzón unificado de Gmail
@@ -74,11 +77,13 @@ npm run gate                # migraciones + lint + tipos + 311 pruebas
 ```bash
 npm run gateway             # recorre los buzones activos cada 45 s y crea las solicitudes (Ctrl+C para detener)
 npm run api                 # API en http://127.0.0.1:3000/api
-npm run web:legacy          # panel anterior en http://localhost:5173 → menú "Bandeja Gmail"
+npm run web                 # panel MailFlow en http://localhost:5173 (inicia sesión con código por correo)
 ```
 
-`npm run web` abre el panel MailFlow nuevo (`frontend`), que hoy usa servicios simulados; el buzón real vuelve en F2.
-Ambos usan el puerto 5173 por defecto: no los ejecute a la vez.
+El panel usa la API real. Con `VITE_USAR_MOCK=1` (en `frontend/`) funciona con servicios simulados, sin backend.
+El conjunto y el administrador iniciales salen de `.env` (`CONJUNTO_INICIAL_SLUG`, `CONJUNTO_INICIAL_NOMBRE`,
+`ADMIN_INICIAL_CORREO`); el código de acceso se envía por SMTP (`SMTP_*`) o, en desarrollo, queda en el log local.
+Pruebas y lint del panel: dentro de `frontend/`, `npm test`, `npm run build` y `npm run lint` (el lint de la raíz no lo cubre).
 
 La primera lectura de un buzón trae solo los correos de los últimos `diasIniciales` días (7 por defecto).
 Por defecto el gateway abre el buzón en solo lectura y no marca nada como leído (`marcarLeido`).
@@ -130,19 +135,21 @@ revise la Ley 1581 con quien corresponda: el texto sale del país hacia un terce
 ```text
 CRM-Residencial/
 ├── ScriptBaseDatosCRM.sql          # línea base del modelo relacional (no se edita)
-├── backend/db/migrations/                  # 0002 … 0006: integridad, fechas, invariantes, rol de la app, sugerencias de IA
-├── backend/api/src/
-│   ├── domain/                     # clasificador, priorizador, enmascarado, máquina de estados (puro)
-│   ├── modules/                    # transacciones T1–T4 y consultas
-│   ├── db/                         # withTx, pool, migraciones, login de la app
-│   ├── http/, server.ts            # API HTTP (Fastify), hoy solo lectura
-│   └── demo/                       # visor provisional
-├── backend/api/test/                  # utilidades y datos solo de pruebas
-├── backend/gateway/                   # Email Gateway IMAP (Gmail) → T1 + checkpoint T6
-├── backend/worker-ia/                 # worker de sugerencias de IA (OpenRouter, OpenCode Go)
-├── frontend/                       # panel MailFlow: React 19 + Vite 7 + Tailwind 4 (proyecto npm propio)
-├── frontend (retirado)/                # panel anterior, referencia hasta F4
-├── docs/                           # plan, estudio, arquitectura, alcance
+├── backend/                        # proyecto npm propio (Node.js + TypeScript)
+│   ├── db/migrations/              # 0002 … 0008: integridad, fechas, invariantes, rol de la app,
+│   │                               #   sugerencias de IA, conjuntos y acceso, buzones y administración
+│   ├── api/src/
+│   │   ├── domain/                 # clasificador, priorizador, enmascarado, máquina de estados (puro)
+│   │   ├── modules/                # transacciones T1–T4/T7, acceso OTP, sesiones, buzones, usuarios,
+│   │   │                           #   residentes, conjuntos, auditoría y consultas
+│   │   ├── db/                     # withTx, pool, migraciones, login de la app
+│   │   ├── http/, server.ts        # API HTTP (Fastify): acceso, buzón, solicitudes, administración, reportes
+│   │   └── demo/                   # visor provisional
+│   ├── api/test/                   # utilidades y datos solo de pruebas
+│   ├── gateway/                    # Email Gateway IMAP multi-buzón → T1 + checkpoint T6
+│   └── worker-ia/                  # worker de sugerencias de IA (OpenRouter, OpenCode Go)
+├── frontend/                       # panel MailFlow: React 19 + Vite 7 + Tailwind 4 + shadcn/ui
+├── docs/                           # planes, entrevistas, estudio, arquitectura, alcance
 └── docker-compose.yml, .env.example
 ```
 
@@ -159,8 +166,9 @@ CRM-Residencial/
 
 ### Etapa 3 — Integración (semanas 3–5)
 - [x] Email Gateway con Gmail.
-- [ ] API REST, autenticación y permisos por rol (hoy: API de solo lectura para el buzón).
-- [ ] Panel conectado a la API y reportes (hoy: el buzón unificado ya usa datos reales).
+- [x] API REST, autenticación (OTP) y permisos por rol dentro de la transacción.
+- [x] Panel conectado a la API y reportes (CSV, auditoría, laboratorio de IA).
+- [ ] Flujo de atención de `SOPORTE`, evidencias y notificaciones SMTP (diseñado, migración `0009` pendiente).
 
 ### Etapa 4 — Endurecimiento (semana 6)
 - [ ] Pruebas con correos reales y de carga.
@@ -172,4 +180,4 @@ CRM-Residencial/
 **Asignatura:** Sistemas Transaccionales / Arquitectura de Software — Universidad Manuela Beltrán
 **Tipo:** Sistema transaccional
 **Versión:** 0.2.0
-**Estado:** MVP en desarrollo (núcleo transaccional terminado)
+**Estado:** MVP funcional (backend y panel completos; faltan endurecimiento y el flujo de soporte)
